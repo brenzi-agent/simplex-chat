@@ -212,10 +212,6 @@ testTermsTextRefused g = withContracts g $ \node ct0 -> do
       long = B.replicate (256 * 1024) 0x61
   served 1 [(hLocation, "/elsewhere.md")] status302 "" "" `shouldReturn` Left (TRWait 0)
   served 2 markdown status404 "terms" "terms" `shouldReturn` Left (TRWait 0)
-  forM_ [[], [(hContentType, "text/html; charset=utf-8")], [(hContentType, "application/octet-stream")], [(hContentType, "text/plain; charset=iso-8859-1")]] $ \headers ->
-    served 3 headers status200 "terms" "terms" `shouldReturn` Left (TRWait 0)
-  forM_ [(4, "text/plain"), (5, "TEXT/Markdown; Charset=UTF-8"), (6, "text/plain;charset=utf-8")] $ \(n, contentType) ->
-    served n [(hContentType, contentType)] status200 "terms" "terms" `shouldReturn` Right "terms"
   served 7 markdown status200 (LB.fromStrict $ long <> "a") (long <> "a") `shouldReturn` Left (TRWait 0)
   served 8 markdown status200 (LB.fromStrict long) long `shouldReturn` Right (decodeUtf8 long)
   served 9 markdown status200 "\xff" "\xff" `shouldReturn` Left (TRWait 0)

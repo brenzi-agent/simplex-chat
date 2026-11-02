@@ -886,8 +886,7 @@ lower-case hex>`, as the dev scripts set.
 
 The service reads both links at one block for each request that needs them, so a change on chain
 applies at once. It fetches each text once, without the link's fragment, following no redirect, within
-10 seconds: a `200` answer with `Content-Type` `text/plain` or `text/markdown`, of charset `utf-8` or
-none, of at most 256 KB, valid UTF-8, whose sha256 is the link's. It keeps each text by its hash, and
+10 seconds: a `200` answer of at most 256 KB, valid UTF-8, whose sha256 is the link's. It keeps each text by its hash, and
 fetches one at a time. After a failed fetch it fetches no text for 30 seconds, or for longer, up to an
 hour, when the answer's `Retry-After` asks, and logs why. `GET /api/terms/<hash>` answers
 `{"link", "text"}` for the hash of either current link, `404` for any other hash or a link the service

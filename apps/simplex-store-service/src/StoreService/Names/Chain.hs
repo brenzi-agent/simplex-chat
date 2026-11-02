@@ -324,7 +324,6 @@ fetchText ChainClient {ccManager, ccTimeout} maxBytes url =
       HTTP.withResponse req {HTTP.redirectCount = 0} ccManager $ \resp -> answer (HTTP.responseStatus resp) (HTTP.responseHeaders resp) (HTTP.responseBody resp)
     answer status headers body
       | statusCode status /= 200 = pure $ Left ("HTTP " <> tshow (statusCode status), retryAfter =<< lookup "Retry-After" headers)
-      | not (maybe False textType $ lookup hContentType headers) = pure $ Left ("its Content-Type is not text/plain or text/markdown in UTF-8", Nothing)
       | otherwise = within <$> HTTP.brReadSome body (maxBytes + 1)
     within b
       | LB.length b > fromIntegral maxBytes = Left ("over " <> tshow maxBytes <> " bytes", Nothing)
@@ -333,11 +332,6 @@ fetchText ChainClient {ccManager, ccTimeout} maxBytes url =
       | not (B.null v) && B.length v <= maxRetryAfterDigits && BC.all isDigit v = readMaybe $ BC.unpack v
       | otherwise = Nothing
     maxRetryAfterDigits = 9
-    textType v = case map T.strip $ T.splitOn ";" $ T.toLower $ decodeLatin1 v of
-      [t] -> t `elem` textTypes
-      [t, "charset=utf-8"] -> t `elem` textTypes
-      _ -> False
-    textTypes = ["text/plain", "text/markdown"]
 
 -- | Only the kind of failure, for callers: an exception's text can hold the URL or its host.
 httpFailure :: HTTP.HttpException -> Text
