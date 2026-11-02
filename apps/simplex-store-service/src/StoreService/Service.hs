@@ -43,7 +43,7 @@ import StoreService.Catalog (StoreProduct (..), defaultCatalog, storeProduct)
 import StoreService.Codes (issueFailedText, issueOneCode, singleUse)
 import StoreService.Config (AppleStoreConfig (..), BadgeIssuerKey (..), ChainConfig (..), NamesConfig (..), PlayStoreConfig (..), ServiceConfig (..), localChainId, minNameYears, readServiceConfig)
 import StoreService.Group (GroupEvent, ensureManagedGroup, fmtTime, groupEvent, hasTracker, refreshTracker, revokeWithTracker, runGroupLane)
-import StoreService.Group.Command (badgeTypeP, codeP, maxMonths, maxNameYears, nameCodeP, textTokenP)
+import StoreService.Group.Command (badgeTypeP, codeP, maxMonths, maxNameYears, nameCodeP, prepaidCodeP, textTokenP)
 import StoreService.Names.Abi (hex)
 import StoreService.Names.Balances (RefundRecord (..), RefundRefusal (..), recordRefund)
 import StoreService.Names.Chain (newChainClient, nodeChainId)
@@ -261,6 +261,7 @@ storeService opts@StoreServiceOpts {serviceConfigFile} baseCfg env = do
   requestEnv <- configureStoreVerifier serviceCfg env
   let groupCfg = serviceCfg >>= \ServiceConfig {group} -> group
       trackerQ_ = groupEventQ env <$ groupCfg
+      namesOn = isJust (serviceCfg >>= names)
       readEvents cc =
         forever $
           atomically (readTBQueue $ outputQ cc) >>= \case
@@ -272,7 +273,7 @@ storeService opts@StoreServiceOpts {serviceConfigFile} baseCfg env = do
       startLanes cc = do
         lanes <- maybe (pure []) (serviceLanes waiters turns cc) serviceCfg
         -- The group is resolved before the other lanes start, so a failed lookup exits at once rather than waiting for them to end.
-        groupLane_ <- forM groupCfg $ \gc -> runGroupLane cc (groupEventQ env) <$> ensureManagedGroup cc gc
+        groupLane_ <- forM groupCfg $ \gc -> runGroupLane cc turns namesOn (groupEventQ env) <$> ensureManagedGroup cc gc
         raceAny_ $ processQueuedRequests key trackerQ_ requestEnv : maybeToList groupLane_ <> lanes
       chatHooks =
         defaultChatHooks
@@ -299,14 +300,16 @@ storeService opts@StoreServiceOpts {serviceConfigFile} baseCfg env = do
       pure $ [runWebListeners webEnv, runPoller pollerEnv] <> nameLanes
 
 startNames :: ChatController -> Turns -> Waiters -> [Provider] -> NamesConfig -> IO NamesEnv
-startNames cc@ChatController {chatStore} turns waiters providers nc@NamesConfig {nTLD, nChain = ChainConfig {cChainId}} =
+startNames cc@ChatController {chatStore} turns waiters providers nc@NamesConfig {nTLD, nCodesOnly, nChain = ChainConfig {cChainId}} =
   readTVarIO (currentUser cc) >>= \case
     Nothing -> putStrLn "No current user" >> exitFailure
     Just User {userId} -> do
-      logInfo $ "names: on, TLD " <> safeDecodeUtf8 (strEncode nTLD) <> ", chain " <> tshow cChainId
+      logInfo $ "names: on, TLD " <> safeDecodeUtf8 (strEncode nTLD) <> ", chain " <> tshow cChainId <> codesOnlyNote
       ne@NamesEnv {neContracts} <- newNamesEnv cc userId nc chatStore turns waiters providers
       logNamePolicy nc neContracts
       pure ne
+  where
+    codesOnlyNote = if nCodesOnly then ", codes only: registration needs a prepaid code" else ""
 
 logNamePolicy :: NamesConfig -> Contracts -> IO ()
 logNamePolicy NamesConfig {nCommunity} ct =
@@ -412,11 +415,6 @@ revokeCmdP = "revoke " *> codeP <* (A.skipSpace *> A.endOfInput)
 
 revokeNameCmdP :: A.Parser NamePrepaidCode
 revokeNameCmdP = "revoke " *> prepaidCodeP <* (A.skipSpace *> A.endOfInput)
-  where
-    prepaidCodeP =
-      parseNameCode . safeDecodeUtf8 <$> A.takeWhile1 (not . isSpace) >>= \case
-        Just (NCPrepaid code) -> pure code
-        _ -> fail "not a prepaid name code"
 
 -- | The reference, and the cents of the balance to refund; without them the balance is shown.
 refundCmdP :: A.Parser (T.Text, Maybe Int)

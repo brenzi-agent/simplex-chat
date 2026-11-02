@@ -132,6 +132,7 @@ badgeGroupIntegrationTests = do
   it "publishes nothing when a code whose tracker was deleted is used up" testDeletedTrackerUsedUp
   it "revokes a code whose tracker an owner deleted for everyone without reposting it" testModeratedTrackerNotRepostedOnRevoke
   it "revokes a code on /revoke, answers a repeat as already revoked and an unknown code as no such code" testGroupRevoke
+  it "refuses /issue name and /bulk name while names are off, still revoking name codes" testGroupNameCodesNamesOff
   it "retires the tracker message when a multi-use code is revoked" testRevokeRetiresTracker
   it "retires the tracker message when the service command revokes the code" testServiceRevokeRetiresTracker
   it "retires a tracker left behind when the code is revoked again" testGroupRevokeRepairsTracker
@@ -299,6 +300,7 @@ namesCodesChatTests = describe "StoreService names: prepaid codes" $ do
   it "issues prepaid codes on /issue name and /bulk name, answering the usage to years below 2" testGroupNameCodes
   it "issues prepaid codes on //issue name, checks them through the names router and revokes them on //revoke" testOperatorNameCodes
   it "revokes a prepaid code in the code's turn, after a reservation holding it" testRevokeTakesCodeTurn
+  it "revokes a prepaid code on /revoke, answering a repeat as already revoked" testGroupRevokeNameCode
 
 testGroupNameCodes :: HasCallStack => TestParams -> IO ()
 testGroupNameCodes ps = do
@@ -310,8 +312,18 @@ testGroupNameCodes ps = do
     bulk <- mapM (prepaidIn . Just) . T.lines =<< replyTo cc alice "/bulk name 6 count 3"
     length bulk `shouldBe` 3
     forM_ bulk $ \code -> (namePrepaidCodeLength code,) <$> prepaidTerms cc code `shouldReturn` (6, Just (6, 2, CPSFree))
-    replyTo cc alice "/issue name 8 years 1" `shouldReturn` "Usage: /issue <type> [months <M>] [uses <N>], or name <length> [years <Y>]"
+    replyTo cc alice "/issue name 8 years 1" `shouldReturn` issueUsage
     countRows cc "sx_badge_service_name_prepaid_codes" `shouldReturn` 4
+
+testGroupRevokeNameCode :: HasCallStack => TestParams -> IO ()
+testGroupRevokeNameCode ps = do
+  svc <- prepareGroupService ps
+  runWithOwner svc {gsIniSections = "" : codesOnlyNames <> chainSection} $ \cc _ _ alice -> do
+    code <- prepaidIn . T.stripPrefix "Code: " =<< replyTo cc alice "/issue name 8"
+    let codeText = formatNameCode (NCPrepaid code)
+    revokeInGroup cc alice codeText "Revoked."
+    revokeInGroup cc alice codeText "Already revoked."
+    (pcRevokedAt =<<) <$> withTransaction (chatStore cc) (`getPrepaidCode` namePrepaidCodeHash code) >>= (`shouldSatisfy` isJust)
 
 testOperatorNameCodes :: HasCallStack => TestParams -> IO ()
 testOperatorNameCodes ps = do
@@ -928,7 +940,7 @@ testRoleGatedIssue ps = do
         let announced name = "#" <> groupName <> ": " <> botName <> " added " <> name
             preMember name = "#" <> groupName <> ": member " <> name
             newMember name = "#" <> groupName <> ": new member " <> name <> " is connected"
-            usageReply = "#" <> groupName <> " " <> botName <> "> Usage: /issue <type>"
+            usageReply = "#" <> groupName <> " " <> botName <> "> Usage:"
         joinGroup cc bob
         waitMemberRole cc gid "bob" "member"
         -- cath joins only after alice sees bob announced, or cath's console shows a different line.
@@ -949,7 +961,7 @@ testRoleGatedIssue ps = do
         waitStoredItem cc "/issue legend"
         ownerIssuesNext cc alice 2
         sendGroupCmd alice "/issue supporter uses 0"
-        waitStoredItem cc "Usage: /issue <type> [months <M>] [uses <N>], or name <length> [years <Y>]"
+        waitStoredItem cc issueUsage
         codeCount cc `shouldReturn` 2
         drainUntil alice [usageReply, newMember "bob", newMember "cath"]
         drainUntil bob [usageReply, preMember "alice", newMember "cath"]
@@ -1287,6 +1299,17 @@ testGroupRevoke ps =
     unissued <- formatBadgeCode <$> randomBadgeCode (random cc)
     revokeInGroup cc alice unissued "No such code."
 
+testGroupNameCodesNamesOff :: HasCallStack => TestParams -> IO ()
+testGroupNameCodesNamesOff ps =
+  withGroupOwner ps $ \_ cc _ alice -> do
+    replyTo cc alice "/issue name 8" `shouldReturn` namesOffReply
+    replyTo cc alice "/bulk name 6 count 2" `shouldReturn` namesOffReply
+    countRows cc "sx_badge_service_name_prepaid_codes" `shouldReturn` 0
+    unissued <- formatNameCode . NCPrepaid <$> randomNamePrepaidCode (random cc) 8
+    revokeInGroup cc alice unissued "No such code."
+  where
+    namesOffReply = "Names are not enabled on this service, so name codes cannot be issued."
+
 testGroupRevokeRepairsTracker :: HasCallStack => TestParams -> IO ()
 testGroupRevokeRepairsTracker ps =
   withGroupOwner ps $ \_ cc _ alice -> do
@@ -1576,11 +1599,14 @@ singleRow sql = \case
   [r] -> Just r
   _ -> error $ "more than one row from: " <> sql
 
+issueUsage :: Text
+issueUsage = "Usage: /issue <kind> [<length>] [years <Y> | months <M>] [uses <N>]\nname <length>: length 6–63, years 2–10\nsupporter, legend, investor: months 1–255, uses 1–1000\ne.g. /issue name 6 years 5 · /issue supporter months 12"
+
 -- The list is spelled out rather than taken from the service, so a change there fails here.
 expectedCommands :: [ChatBotCommand]
 expectedCommands =
-  [ CBCCommand "issue" "Generate a badge or name code" (Just "<type> [months <M>] [uses <N>], or name <length> [years <Y>]"),
-    CBCCommand "bulk" "Generate many single-use codes" (Just "<type> [months <M>] count <B>, or name <length> [years <Y>] count <B>"),
+  [ CBCCommand "issue" "Generate a code" (Just "<name <length>|supporter|legend|investor> [years|months <N>] [uses <N>]"),
+    CBCCommand "bulk" "Generate many codes" (Just "<name <length>|supporter|legend|investor> [years|months <N>] count <N>"),
     CBCCommand "revoke" "Revoke a code" (Just "<code>")
   ]
 
