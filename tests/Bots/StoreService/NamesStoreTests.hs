@@ -209,7 +209,7 @@ testNamesDownUp :: IO ()
 testNamesDownUp = withServiceStore $ \st -> do
   let names = dropWhile ((/= "20261013_names") . name) storeServiceSchemaMigrations
       badgeColumns = mapM (fmap sort . columnsOf st) badgeTables
-  map name names `shouldBe` ["20261013_names", "20261022_drop_taken_codes", "20261022_name_balances", "20261022_name_late_wait", "20261023_name_terms", "20261027_name_invoiced_units", "20261028_name_terms_acceptance", "20261029_name_record_changes"]
+  map name names `shouldBe` ["20261013_names", "20261022_drop_taken_codes", "20261022_name_balances", "20261022_name_late_wait", "20261023_name_terms", "20261027_name_invoiced_units", "20261029_name_record_changes", "20261102_name_terms_acceptance"]
   badgeBefore <- badgeColumns
   code <- issue st 1 usable
   placeCode st "r1" ownerA (order "alicebakery" 1) code `shouldReturn` Right ()
@@ -342,7 +342,7 @@ testPartialAcceptance = withServiceStore $ \st -> do
 
 testNameTermsAcceptanceMigration :: IO ()
 testNameTermsAcceptanceMigration = withServiceStore $ \st -> do
-  let acceptance = [m | m@Migration {name = "20261028_name_terms_acceptance"} <- storeServiceSchemaMigrations]
+  let acceptance = [m | m@Migration {name = "20261102_name_terms_acceptance"} <- storeServiceSchemaMigrations]
       applied :: IO Bool
       applied = elem "accept_terms" <$> columnsOf st "sx_badge_service_name_registrations"
       kinds :: IO [Text]
