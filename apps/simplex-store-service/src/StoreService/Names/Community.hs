@@ -40,12 +40,7 @@ termsFor listed Terms {tmHash} = (if listed then communityTermsPrefix else "") <
 
 -- | The community terms hash an order signed, Nothing for plain terms.
 agreedTermsHash :: Text -> Maybe ByteString
-agreedTermsHash terms = case T.splitOn "/" terms of
-  ["community", h] -> hashOf h
-  [_version, "community", h] -> hashOf h
-  _ -> Nothing
-  where
-    hashOf = bytes32FromHex . ("0x" <>)
+agreedTermsHash terms = bytes32FromHex . ("0x" <>) =<< T.stripPrefix communityTermsPrefix terms
 
 communityTermsPrefix :: Text
 communityTermsPrefix = "community/"
