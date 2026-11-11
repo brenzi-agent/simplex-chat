@@ -590,7 +590,7 @@ test("typing: a live status in an approved direct chat, its note, the answer tha
   await statusDeleted
   await outcome
   const posts = (await alice.chat.apiGetChat(T.ChatType.Group, controlId, 50)).chatItems.filter(({content}) => content.type === "rcvMsgContent").map(({meta}) => meta.itemText)
-  expect(posts.slice(posts.findIndex(text => text.startsWith("Approved for contact Alice")) + 1)).toEqual([`I sent a message to contact Alice:\n\`12:00\`\nApproved for this chat by Alice. /'revoke ${chat}'`])
+  expect(posts.slice(posts.findIndex(text => text.startsWith("Approved for contact Alice")) + 1)).toEqual([`I sent a message to contact Alice:\n\`12:00\`\nApproved for this chat by Alice. /'revoke ${chat}' or /'copies ${chat} off'`])
 
   const secondStatus = received(alice.chat, isStatus)
   await prompt("and the date?")
