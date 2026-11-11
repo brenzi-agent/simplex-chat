@@ -11,6 +11,7 @@ In:
 - the agent control chat: the owner approves the agent's connects, sends, downloads and leaves there, or all sends to one chat, or all downloads from one chat;
 - six tools: `connect`, `send`, `receive`, `download`, `list`, `leave`;
 - files: the `file` field of received messages, `download` to save one in the data folder, `send` with `file` to send one;
+- scheduled prompts: an approver schedules a prompt for a chat in the agent control chat, with cron times; `receive` of that chat returns it when due;
 - connections to contact addresses, one-time links, groups, channels and SimpleX names, as the agent's profile or incognito;
 - bots as services: the commands a bot advertises are returned by `connect`;
 - a status message while the agent works, in a chat whose messages the owner approved with `/approve CHAT all`: the agent's state, its notes, the state of a model behind llama-swap or llama-server, and the permission prompts, compaction, running tools and subagents of the agent's Claude Code sessions, reported by status hooks.
@@ -57,6 +58,8 @@ agent name       NAME                 person, serve                       person
 display name     DISPLAY              person, --display-name, else NAME   owner, peers      the agent's profile; the agent control chat's name
 action           N                    server: counter in the custom data  owner, agent      /approve [CHAT] N, /reject [CHAT] N, /receive [CHAT] N, /forward [CHAT] N; tool results; list
                                       of the agent control chat
+schedule         N                    server: position in the chat's      owner             /unschedule CHAT N; /schedules; log lines
+                                      schedules
 chat             @N contact, #N group SimpleX core                        agent, owner      tool inputs and results; CHAT in commands and cards
 item             N                    SimpleX core                        agent             reply_to; download; messages
 member           N (groupMemberId)    SimpleX core                        agent             from_member; mention
@@ -74,6 +77,8 @@ link                     rule
 owner command -> action  /approve [CHAT] N or /reject [CHAT] N from an approver, action N pending in memory, CHAT its chat when given; otherwise a reply
 chat -> approval         the chat's custom data {simplexMcp: {approvedBy, approvedById, approvedAt}}, in mode requests, while member approvedById is an approver
 chat -> files approval   the chat's custom data {simplexMcpFiles: {approvedBy, approvedById, approvedAt}}, as the approval
+chat -> schedules        the chat's custom data {simplexMcpSchedules: [{cron, prompt, by, byId, at}]}; an entry applies while member byId is an approver and the control chat is not lost
+schedule -> receive      the entry's due prompt, one per entry, in memory until a receive of the chat returns it
 download -> file         the file ID of the item: one download per file ID in memory, settled by the file's events
 action -> card           actions[N].card: the card's item ID in the agent control chat
 tool call -> action      same tool and action fields, action in memory: the call attaches; otherwise a new action
@@ -339,6 +344,9 @@ action decided                  Action 2 rejected by Alice. | Action 2 expired.
 mode host                       Action 2: performed without approval (mode host). | ...; failed: <error>.
 counter or card not written     Action 2: failed: <error>.
 owner's /leave CHAT             Left business Ridgeline (#9), requested by Alice. | Deleted bot SimpleX Directory (@4), requested by Alice.
+owner's /schedule               Schedule 1 of #3 added by Alice: 0 7 * * 1-5.
+owner's /unschedule             Schedule 1 of #3 removed by Alice.
+scheduled prompt due            Scheduled prompt 1 of #3 is due.
 owner added, --owners LIST      Bob (member 7) is now an owner and can't approve actions yet. Restart the server with --owners 3:Alice,7:Bob
 owner gone, --owners LIST       Alice (member 3) is no longer an owner. Restart the server with --owners 7:Bob   (the human owners remaining)
 no human owner remains          Alice (member 3) is no longer an owner. No owners remain: restart the server with --reset-owners --owners
@@ -490,12 +498,13 @@ host, interrupted   the request's lines except the commands line + "Performed wi
 
 ### Commands
 
-The group's command menu has `/pending`, `/list` and `/leave`; the cards carry the others.
+The group's command menu has `/pending`, `/list`, `/schedules` and `/leave`; the cards show the others, except the schedule commands (section Schedules).
 
 ```
 menu entry   keyword   label                 params      tapped
 /pending     pending   Pending actions       none        sent
 /list        list      Chats and approvals   none        sent
+/schedules   schedules Scheduled prompts     none        sent
 /leave       leave     Leave a chat          <chat ID>   "/leave <chat ID>" in the entry field, the cursor at its end
 ```
 
@@ -518,6 +527,10 @@ command             result
 /delete CHAT files  the running downloads of CHAT failed and cancelled, also those the core continues after a restart, then the folder of CHAT deleted, for a current or a left chat
 /pending            one line per pending action: "2  send to bot SimpleX Directory  expires 2026-10-18 09:15 UTC"; "No pending actions." when none
 /list               one line per chat of the agent, as list returns them: the 100 most recent chats, each line cut to 100 bytes as encoded in the message, "…" included; then "K older chats are not shown." ("1 older chat is not shown.") when more exist
+/schedule CHAT CRON a schedule of CHAT by the sender: PROMPT is made due at each local minute matched by CRON, and the server returns it in the next receive of CHAT (section Schedules)
+  PROMPT
+/unschedule CHAT N  schedule N of CHAT is removed; the later ones are renumbered
+/schedules          one line per schedule, for the chats in the order of /list, then by N: "#3  1  0 7 * * 1-5  Post the trail report."; the prompt on one line; each line cut to 100 bytes as /list lines; the first 100 lines, then "K more schedules are not shown." ("1 more schedule is not shown.") when more exist
 ```
 
 `/list`:
@@ -578,6 +591,44 @@ Files from business Ridgeline (#9) are kept in `/home/alice/.simplex-mcp/my-agen
 - `/leave CHAT` applies in both modes. Its reply is logged, with names on one line.
 - A standing approval covers sends only. It ends at `/revoke`, when the chat is deleted, or when member `approvedById` is no longer an approver. It applies in mode `requests` only: in mode `host`, `list` and `/list` show no approvals, and `/approve CHAT all` stores none.
 - `/copies CHAT off` sets `simplexMcpCopies: false` in the chat's custom data, keeping its other keys; `/copies CHAT on` removes it, and `/revoke CHAT` keeps it. In mode `host`, `/list` does not show it.
+
+### Schedules
+
+With `/schedule #3 0 7 * * 1-5 Post the trail report.` an approver schedules the prompt for 07:00 server time on weekdays; the server returns it to the agent in `scheduled` of `receive` of `#3` (section receive).
+
+```
+part     rule
+CHAT     a chat of the agent; the agent control chat is refused
+CRON     the 5 words after CHAT, joined by single spaces
+PROMPT   the rest of the line, its outer whitespace trimmed; 1 to 2000 characters (code points)
+```
+
+```
+field          range
+minute         0-59
+hour           0-23
+day of month   1-31
+month          1-12
+day of week    0-7; 0 and 7 are Sunday
+```
+
+```
+item     values
+*        the field's range
+N        N
+A-B      A to B
+*/S      every S-th value of the range, from its start
+A-B/S    every S-th value from A to B
+```
+
+- A field is an item or a comma list of items, numbers only. Out of range: a value outside the field's range, A above B, or S equal to 0.
+- Day of month and day of week: when neither field starts with `*`, a day matched by one of them suffices, as in vixie cron; otherwise a day is matched by both.
+- Times are the local time of the server process, in the time zone of TZ, otherwise of the system; the reply to `/schedule` names the UTC offset at that moment. A local minute skipped by a daylight saving change is not matched; a repeated one is matched twice.
+- At each minute boundary, the server makes due the prompt of each schedule that applies and whose CRON is matched by the local time. A schedule applies while member `byId` is an approver and the control chat is not lost. Every schedule is listed by `/schedules`, also one that does not apply.
+- One prompt per schedule stays due, with the minute it was made due, until a `receive` of the chat returns it. Due prompts are kept in memory: they are dropped at a restart, and the minutes while the server is stopped are skipped.
+- A chat has at most 10 schedules. N is the position in the chat's list: `/unschedule` renumbers the later ones, and their due prompts are kept.
+- Schedules are stored in the chat's custom data, its other keys kept, and are deleted with the chat by `leave` and `/leave`. Entries of another form, or with a CRON that is not valid, are left out, and dropped at the next write of the chat's schedules.
+- The schedule commands apply in both modes. `/schedule` and `/unschedule` are logged, with names on one line.
 
 ### Membership messages
 
@@ -744,7 +795,7 @@ Chat references are @N for contacts and #N for groups and channels.
 
 ### Calls
 
-- A call waits inside the server: for the approver's decision, when its action is pending; then for its condition (`connect`: the connection; `send`: responses; `receive`: a new message).
+- A call waits inside the server: for the approver's decision, when its action is pending; then for its condition (`connect`: the connection; `send`: responses; `receive`: a new message or a due prompt of the chat).
 - When the request carries a progress token, the server sends a progress notification at once and then every 60 seconds; Claude Code shows the latest one in the task's entry.
 - A call that ends without its result leaves its action unchanged; the same call again attaches to it. Messages are marked read only when the handler returns without an abort.
 - Errors the model can correct, schema violations included, return `isError: true` and a message. Errors after approval are results with `status: "failed"` and `error`.
@@ -874,7 +925,7 @@ other              file      none                                               
 ```
 input field   type     rule
 chat          string   required; a chat of the agent
-wait          number   optional; seconds to wait when no message is new; 0 to 86400; default 0
+wait          number   optional; seconds to wait when no message is new and no prompt of the chat is due; 0 to 86400; default 0
 limit         number   optional; 1 to 100; default 50
 typing        boolean  optional; default false; true: when messages are returned, the chat's status message is started (section What the owner sees: the status message)
 ```
@@ -884,6 +935,7 @@ result field  type        present
 chat          string      always
 messages      Message[]   always; the new messages, up to limit: the unread ones in chat order, then those that arrive during the call
 more          number      always; new messages not returned
+scheduled     array       a prompt of the chat is due; {prompt, at} of each due prompt, in the order of the chat's schedules; at: the minute it was made due, as 2026-11-11 06:00 UTC
 ```
 
 - New: a received message that is unread when the call reads its page, or that arrives during the call. The returned ones are marked read; another call marking one read after this call collected it does not remove it.
@@ -1106,12 +1158,14 @@ serve(NAME, options):
     POST /hook with the token: Activity.record of the event, from the listen on (section Claude Code activity)
   write DIR/server.json {name: NAME, port, expireHours}
   lost unset: ownerStart(group)
+  start the schedule timer at the next minute boundary (section Schedules)
   log "Listening on http://127.0.0.1:PORT/mcp"
   every 60 s, and at each owner command: expire the pending actions whose expires has passed (wall clock, so a sleep of the computer delays no expiry);
     delete from memory the decided actions (done, failed, rejected, expired) with open 0 whose expires has passed, and stop their collections
   drain buffered events
 
 SIGINT, SIGTERM (process.on; a second signal ends the wait for the cards at once):
+  stop the schedule timer
   stopping = true: new actions get the tool error "The server is stopping."; a host-mode action whose card is still being posted is cancelled, not performed
   close HTTP (open calls end); stop handling events, so no /approve starts a perform
   wait for the cards being posted
@@ -1136,6 +1190,7 @@ g = /_group <user> {displayName: DISPLAY, fullName: "",
   groupPreferences: {history: {enable: "on"}, commands: [
     {type: "command", keyword: "pending", label: "Pending actions"},
     {type: "command", keyword: "list", label: "Chats and approvals"},
+    {type: "command", keyword: "schedules", label: "Scheduled prompts"},
     {type: "command", keyword: "leave", label: "Leave a chat", params: "<chat ID>"}]}}
 /_set custom #g {simplexMcp: {control: true, nextAction: n}}
 log "Agent control chat \"DISPLAY\" created."
@@ -1220,6 +1275,16 @@ delete CHAT files: each download of CHAT in memory: rejected, "Your owner delete
 pending:          reply with the pending actions
 list:             reply with one line per chat of list(), the 100 most recent: CHAT, the type and name, ", approved for this chat by NAME" and ", files approved by NAME" while each approval applies, ", not connected";
                   each line cut to 100 encoded bytes with "…"; then "K older chats are not shown." when more exist (worst case about 10.3 KB, below the 15602-byte message)
+schedule CHAT CRON PROMPT: CRON the 5 words after CHAT, joined by single spaces; PROMPT the rest of the line
+                  CHAT not a chat of the agent: reply "No chat CHAT. ..."; CRON not valid: reply its error; PROMPT over 2000 code points: reply "Schedule: the prompt is over 2000 characters.";
+                  10 valid entries: reply "Schedule: ... has 10 schedules; /'unschedule CHAT N' removes one."
+                  otherwise entries = the valid entries + {cron, prompt, by: sender name, byId: sender groupMemberId, at: now}; set the chat's custom data simplexMcpSchedules = entries, keeping its other keys;
+                  the chat's entries in memory replaced, the due prompts of the kept entries kept by at; log "Schedule N of CHAT added by NAME: CRON."; reply "Schedule N of ... (CHAT): CRON, server time UTC±HH:MM. /'unschedule CHAT N'"
+unschedule CHAT N: CHAT not a chat of the agent: reply "No chat CHAT. ..."; N not from 1 to the count of valid entries: reply "CHAT has no schedule N."
+                  otherwise set simplexMcpSchedules = the valid entries without entry N, keeping the other keys; the chat's entries in memory replaced as above;
+                  log "Schedule N of CHAT removed by NAME."; reply "Schedule N of ... (CHAT) is removed."
+schedules:        reply with one line per valid entry of each chat of list(), in its order: CHAT, N, CRON and the prompt on one line, joined by two spaces; each line cut to 100 encoded bytes with "…";
+                  the first 100 lines, then "K more schedules are not shown." when more exist; "No schedules." when none
 ```
 
 - Owner commands run one at a time, in arrival order: a command awaits the custom data write of the one before it.
@@ -1568,7 +1633,7 @@ of progress                                 (an XFTP file returns to rcvInvitati
 ```
 receive(input, ctx):
   chat is the agent control chat: tool error "unknown chat"
-  from now, each newChatItems of chat adds its received message items to arrived
+  from now, each newChatItems of chat adds its received message items to arrived, and the call is woken when a prompt of chat is made due
   s = /_get chat <chat> initial=1; a store error: tool error "unknown chat"
   s.chatStats.unreadCount > 0: pages = /_get chat <chat> around=<s.chatStats.minUnreadItemId> count=0 (that item alone),
     then /_get chat <chat> after=<the last item ID> count=100, repeated while the last after= page holds 100 and pages hold fewer than limit + 1 rcvNew message items that are not live
@@ -1964,6 +2029,28 @@ sequenceDiagram
   S->>V: /_leave #9; /_delete #9 full notify=on
   S->>O: card edited: "I left business Ridgeline (#9). Approved by Alice."
   S->>A: {action: 12, status: done, chat: "#9"}
+```
+
+### Scheduled prompt
+
+```mermaid
+sequenceDiagram
+  participant A as Agent
+  participant S as Server
+  participant O as Owner
+  participant G as Group #15
+  O->>S: /schedule #15 0 7 * * 1-5 Post the trail report.
+  S->>S: /_set custom #15 {simplexMcpSchedules: [{cron: "0 7 * * 1-5", prompt: "Post the trail report.", by: "Alice", byId: 3, at}]}
+  S->>O: "Schedule 1 of group ... (#15): 0 7 * * 1-5, server time UTC+01:00. /unschedule #15 1"
+  A->>S: receive {chat: "#15", wait: 3600}
+  Note over S: Wednesday 2026-11-11, 07:00 server time: schedule 1 matched
+  S->>A: {chat: "#15", messages: [], more: 0, scheduled: [{prompt: "Post the trail report.", at: "2026-11-11 06:00 UTC"}]}
+  A->>S: send {chat: "#15", text: "Trail report: ..."}
+  S->>O: send card, as for any send
+  O->>S: /approve #15 13
+  S->>G: item 60
+  S->>A: {action: 13, status: done, chat: "#15", item: 60, responses: [...]}
+  A->>S: receive {chat: "#15", wait: 3600}
 ```
 
 ### Other scenarios

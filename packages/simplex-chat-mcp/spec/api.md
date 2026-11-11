@@ -217,17 +217,18 @@ Input:
 | Field | Type | Range | Default | Rule |
 |---|---|---|---|---|
 | `chat` | string | | required | `@N` or `#N` of the agent |
-| `wait` | number | 0 to 86400 | 0 | seconds to wait when no message is new |
+| `wait` | number | 0 to 86400 | 0 | seconds to wait when no message is new and no scheduled prompt of the chat is due |
 | `limit` | integer | 1 to 100 | 50 | most messages returned |
 | `typing` | boolean | | `false` | `true`: when the call returns messages, a status message is started in `chat` ([1.10](#110-status-message)) |
 
-Output (all fields always present):
+Output (`chat`, `messages` and `more` always present):
 
 | Field | Value |
 |---|---|
 | `chat` | the chat reference |
 | `messages` | unread received messages in chat order, then received messages that arrived during the call; live items left out; at most `limit` |
 | `more` | new messages not returned, overflow, and unread items left unread by the page reads |
+| `scheduled` | the due scheduled prompts of the chat, each `{prompt, at}`, `at` the minute it became due as `YYYY-MM-DD HH:MM UTC`; present only when one is due |
 
 Tool errors: `No chat CHAT. list shows the agent's chats.` for an invalid reference, the control chat, or a store error of the first read, `initial` 1 ([tools.ts:1171](../src/tools.ts#L1171), [:1175-1177](../src/tools.ts#L1175-L1177)); other chat errors, a store error of a later page read included, as their error text ([log.ts:45-53](../src/log.ts#L45-L53)).
 
@@ -498,6 +499,8 @@ line      spaces, "/", KEYWORD, PARAMS
 KEYWORD   characters up to the first whitespace
 PARAMS    the rest, trimmed, split on whitespace
 CHAT      @N or #N, 1 to 15 digits
+CRON      5 words of PARAMS, joined by single spaces
+PROMPT    the rest of PARAMS, its whitespace kept
 requests
   approve N
   approve CHAT N
@@ -517,6 +520,9 @@ requests
   delete CHAT files
   pending
   list
+  schedule CHAT CRON PROMPT
+  unschedule CHAT N
+  schedules
 ```
 
 The server reads commands from members' messages in the main conversation of the control chat ([serve.ts:141](../src/serve.ts#L141), [control.ts:171-181](../src/control.ts#L171-L181)). It answers a command with a reply that quotes it, one command after another, and it runs the expiry check before each command ([control.ts:179](../src/control.ts#L179), [:201](../src/control.ts#L201)).

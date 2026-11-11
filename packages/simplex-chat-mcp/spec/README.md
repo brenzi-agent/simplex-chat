@@ -49,11 +49,13 @@ graph TD
   serve --> files["files.ts"]
   serve --> messages
   serve --> log
+  serve --> schedule["schedule.ts"]
   control --> tools
   control --> actions
   control --> messages
   control --> log
   control -.-> serve
+  control --> schedule
   tools --> actions
   tools --> messages
   tools --> log
@@ -73,6 +75,8 @@ graph TD
   actions --> messages
   actions --> log
   actions -.-> tools
+  schedule --> messages
+  schedule --> log
   register --> files
   register --> log
   files --> log
@@ -107,7 +111,8 @@ graph TD
 | [`inference.ts`](../src/inference.ts) | inference endpoint poller: model states, prompt tokens, tokens per second |
 | [`activity.ts`](../src/activity.ts) | Claude Code activity from hook events: agent sessions, running tools, subagents, permission prompts, compaction |
 | [`actions.ts`](../src/actions.ts) | action records, state machine, expiry, stop |
-| [`control.ts`](../src/control.ts) | agent control chat: link, owners, owner commands, cards, counter |
+| [`control.ts`](../src/control.ts) | agent control chat: link, owners, owner commands, cards, counter, schedule storage |
+| [`schedule.ts`](../src/schedule.ts) | scheduled prompts: cron check and matching, minute timer, due prompts per chat |
 | [`messages.ts`](../src/messages.ts) | message items and their files, item watch, waits, unread paging, display names |
 | [`files.ts`](../src/files.ts) | data folder, lock, token, `headers.json`, `hook-headers`, `server.json` |
 | [`register.ts`](../src/register.ts) | `register` command: Claude Code entry, status hooks |

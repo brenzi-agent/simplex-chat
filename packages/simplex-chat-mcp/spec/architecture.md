@@ -37,6 +37,7 @@ flowchart LR
     activity["activity.ts<br/>Activity"]
     actions["actions.ts<br/>Actions"]
     control["control.ts<br/>Control"]
+    schedule["schedule.ts<br/>Schedules"]
     messages["messages.ts<br/>ChatItemsWatch"]
     serve["serve.ts<br/>start, events, stop"]
     files["files.ts"]
@@ -534,7 +535,7 @@ Owner commands are queued in a second chain, independent of the membership chain
 
 On `SIGINT` or `SIGTERM` the server runs one stop; a later signal ends its wait for cancelled cards and status deletions ([serve.ts:50-66](../src/serve.ts#L50-L66)). `RunningServer.stop` ([serve.ts:178-189](../src/serve.ts#L178-L189)):
 
-1. Events are ignored from now on.
+1. Events are ignored from now on, and the schedule timer is cleared.
 2. `Actions.stop` starts: new actions are refused with `The server is stopping.`; the expiry timer is cleared; cards being posted are awaited; pending and performing actions are marked interrupted; the stop signal of the performs is aborted, which ends the wait of a `connect` for its connection; their cards are edited, or posted when they have no card; outcome edits already in progress are awaited ([actions.ts:240-250](../src/actions.ts#L240-L250)).
 3. In parallel with step 2, the HTTP server is closed with all connections, and open calls are aborted ([http.ts:57-61](../src/http.ts#L57-L61)).
 4. `Cancelled K action(s).` when K > 0 ([serve.ts:183](../src/serve.ts#L183)).
@@ -705,6 +706,20 @@ Outcomes are posted after `done` and `failed` ([actions.ts:282](../src/actions.t
 | one write at a time, also after a failed write | [control.ts:135-139](../src/control.ts#L135-L139) |
 | `--reset-owners` copies the value into the new control chat | [serve.ts:237-238](../src/serve.ts#L237-L238), [control.ts:522-527](../src/control.ts#L522-L527) |
 | a refused call leaves the counter unchanged | [actions.ts:177](../src/actions.ts#L177) |
+
+### 5.8 Scheduled prompts
+
+| Rule | Code |
+|---|---|
+| add: `/schedule CHAT CRON PROMPT` from an approver, in both modes; the entry is appended to the custom data of CHAT, at most 10 per chat | [control.ts:284-298](../src/control.ts#L284-L298) |
+| removal: `/unschedule CHAT N` from an approver; the later entries of CHAT are renumbered | [control.ts:300-310](../src/control.ts#L300-L310) |
+| the entries in memory are set at load, at each add and removal, and to none when the agent leaves the chat | [control.ts:117](../src/control.ts#L117), [:295](../src/control.ts#L295), [:307](../src/control.ts#L307), [tools.ts:966](../src/tools.ts#L966) |
+| at each minute boundary, an entry becomes due when it is not due already, member `byId` is an approver, the control chat is not lost, and its cron matches the boundary minute in local time; logged | [schedule.ts:49-68](../src/schedule.ts#L49-L68), [control.ts:144-146](../src/control.ts#L144-L146) |
+| one due prompt per entry, with the minute it first became due; an entry set again with the same creation time keeps it; the due prompt of a removed entry is dropped | [schedule.ts:19-22](../src/schedule.ts#L19-L22), [:61-62](../src/schedule.ts#L61-L62) |
+| `receive` of CHAT: a waiting call ends when a prompt of CHAT becomes due; the due prompts are taken after the messages are marked read, and returned in `scheduled` | [tools.ts:1128](../src/tools.ts#L1128), [:1139-1156](../src/tools.ts#L1139-L1156) |
+| prompts due while the server is stopped are not delivered later: due prompts are kept in memory only, and the timer starts after the owner setup | [serve.ts:128](../src/serve.ts#L128), [:176](../src/serve.ts#L176) |
+
+When a tick is delayed by a sleep of the computer, the minute it was set for is checked, and the minutes until the next boundary are skipped ([schedule.ts:49-55](../src/schedule.ts#L49-L55)).
 
 ---
 

@@ -68,7 +68,7 @@ sequenceDiagram
   S->>S: DATA/files/sent deleted
   S->>C: startChat, events buffered
   S->>C: apiListGroups USER (no control marker)
-  S->>C: apiNewGroup USER {My Agent, history on, menu pending, list and leave}
+  S->>C: apiNewGroup USER {My Agent, history on, menu pending, list, schedules and leave}
   S->>C: apiSetGroupCustomData #G {"simplexMcp":{"control":true,"nextAction":1}}
   S->>P: Agent control chat "My Agent" created.
   S->>K: load
@@ -79,6 +79,7 @@ sequenceDiagram
   K->>C: apiDeleteGroupLink #G (groupLinkNotFound ignored)
   K->>C: apiCreateGroupLink #G member
   K->>P: join line, QR code, link, QR hint, owner line
+  S->>S: schedule timer started
   S->>P: Listening on http://127.0.0.1:5226/mcp
   O->>C: joins by the link
   C->>S: joinedGroupMember
@@ -370,7 +371,7 @@ sequenceDiagram
   T->>C: apiGetChat #9 count 0
   T->>C: apiLeaveGroup #9 (membership current or pending)
   T->>C: apiDeleteChat #9 full, notify
-  T->>T: DATA/forwarded/group-9 deleted
+  T->>T: DATA/forwarded/group-9 deleted, schedules of #9 dropped
   X->>K: outcome
   K->>O: card edited: I left business X (#9). Approved by Alice.
   K->>O: Files from business X (#9) are kept in `DATA/files/group-9`: K files, SIZE. /'delete #9 files' (when the folder has files)
@@ -507,7 +508,7 @@ sequenceDiagram
   participant C as Core
   participant O as Owner
   P->>S: Ctrl-C (SIGINT)
-  S->>S: stopped: events ignored
+  S->>S: stopped: events ignored, schedule timer cleared
   par actions
     S->>X: stop()
     X->>X: stopping, timer cleared, cards being posted awaited
@@ -723,7 +724,7 @@ sequenceDiagram
   T->>C: apiDeleteChatItems #9 [status item] broadcast (when #9 has a status message)
   T->>C: apiLeaveGroup #9, apiDeleteChat #9 full, notify
   C->>D: the agent left the group
-  T->>T: DATA/forwarded/group-9 deleted
+  T->>T: DATA/forwarded/group-9 deleted, schedules of #9 dropped
   K->>P: Left business Ridgeline (#9), requested by Alice.
   K->>X: reject each pending action of #9 with a card
   K->>O: Left business Ridgeline (#9), requested by Alice.
