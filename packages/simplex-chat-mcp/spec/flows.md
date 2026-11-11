@@ -315,7 +315,8 @@ sequenceDiagram
   X->>T: performSend
   T->>C: apiSendMessages #9 [...]
   X->>K: outcome
-  K->>O: I sent a message to business X: `text` Approved for this chat by Alice. /'revoke #9'
+  K->>C: apiGetChat #9 count 0
+  K->>O: I sent a message to business X: `text` Approved for this chat by Alice. /'revoke #9' or /'copies #9 off'
   T-->>A: {action, status: done, chat: #9, item, responses, more}
   O->>C: /revoke #9
   K->>C: apiGetChat #9 count 0
@@ -440,7 +441,7 @@ Notes:
 - Expiry times are listed in the `/pending` reply ([control.ts:618-620](../src/control.ts#L618-L620)).
 - The server ends the connect wait at `created + 23 h 50 min`, within the 24 hours in which a message can be edited ([tools.ts:148](../src/tools.ts#L148), [:706](../src/tools.ts#L706)).
 
-Source: [actions.ts:129](../src/actions.ts#L129), [:163](../src/actions.ts#L163), [:193-204](../src/actions.ts#L193-L204), [control.ts:201](../src/control.ts#L201), [:227](../src/control.ts#L227).
+Source: [actions.ts:129](../src/actions.ts#L129), [:163](../src/actions.ts#L163), [:193-204](../src/actions.ts#L193-L204), [control.ts:202](../src/control.ts#L202), [:230](../src/control.ts#L230).
 
 ---
 
@@ -517,7 +518,7 @@ sequenceDiagram
 
 Notes:
 
-- The interrupted card line is `DECIDER; interrupted: the server stopped.` ([control.ts:561](../src/control.ts#L561)).
+- The interrupted card line is `DECIDER; interrupted: the server stopped.` ([control.ts:575](../src/control.ts#L575)).
 - An action of mode `host` or of a standing approval whose counter is being written at the stop is set to `pending` and cancelled without a perform ([actions.ts:265-270](../src/actions.ts#L265-L270)).
 - After a crash, the cards of that run are left with their commands; `/approve` of their numbers gets the reply `Action N is not pending.` ([control.ts:227](../src/control.ts#L227)).
 - The stop signal of the performs is aborted after the actions are marked interrupted: a `connect` waiting for its connection ends, and an interrupted perform logs no line ([actions.ts:245-246](../src/actions.ts#L245-L246), [:280](../src/actions.ts#L280), [tools.ts:730-731](../src/tools.ts#L730-L731)).
@@ -566,7 +567,7 @@ Notes:
 - With `--reset-owners`, the server deletes the control chat for all members and creates a new one with the same counter; the CLI refuses the option with an `--owners` list ([control.ts:522-527](../src/control.ts#L522-L527), [serve.ts:236](../src/serve.ts#L236), [cli.ts:111-113](../src/cli.ts#L111-L113)).
 - When a listed owner leaves and none remains: `... is no longer an owner. No owners remain: restart the server with --reset-owners --owners` ([control.ts:393-398](../src/control.ts#L393-L398)).
 
-Source: [control.ts:347-369](../src/control.ts#L347-L369), [:380-399](../src/control.ts#L380-L399), [:406-416](../src/control.ts#L406-L416), [:758-784](../src/control.ts#L758-L784).
+Source: [control.ts:361-383](../src/control.ts#L361-L383), [:394-413](../src/control.ts#L394-L413), [:420-430](../src/control.ts#L420-L430), [:777-803](../src/control.ts#L777-L803).
 
 ---
 

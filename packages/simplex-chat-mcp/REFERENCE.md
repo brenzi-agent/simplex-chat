@@ -269,6 +269,7 @@ Commands:
 | `/reject N`, `/reject #9 N` | Rejects action N. |
 | `/approve #9 all` | Approves all the agent's messages to chat #9: the pending ones and later ones. |
 | `/revoke #9` | Ends that approval: each message to #9 needs approval again. |
+| `/copies #9 off`, `/copies #9 on` | Stops or resumes the copies of the agent's messages to chat #9 that are posted here under that approval. |
 | `/receive #3 7` | The agent receives the file of download 7: the server downloads it, and the agent's call returns its path. |
 | `/receive #3 7 all` | The same, and the agent receives its later downloads from chat #3 of files on its XFTP servers without asking. Other pending downloads of #3 stay pending. |
 | `/receive #3 off` | Ends that: each download from #3 needs approval again. |
@@ -276,7 +277,7 @@ Commands:
 | `/leave #9`, `/leave @4` | Makes the agent leave group #9, or delete contact @4, at once, in both approval modes, and rejects the agent's pending actions for that chat. The reply, for example `Left business Ridgeline (#9), requested by Alice.`, is logged too. |
 | `/delete #9 files` | Cancels the running downloads from chat #9, which then fail, also those the core continues after a restart, and deletes the chat's files in the data folder, forwarded ones included, for a current or a left chat: `Deleted 3 files from #9, 2.1 MB.` or `No files from #9.` |
 | `/pending` | Lists pending actions. |
-| `/list` | Lists the agent's 100 most recent chats, one line each, and which of them are approved for all messages or all files: `, approved for this chat by NAME` and `, files approved by NAME`; a last line counts the older chats. |
+| `/list` | Lists the agent's 100 most recent chats, one line each, and which of them are approved for all messages or all files: `, approved for this chat by NAME` and `, files approved by NAME`; `, copies off` when their copies are off, in mode `requests`; a last line counts the older chats. |
 
 After `/leave #9`, or after the agent's `leave` of #9 is performed in either mode, when the chat's folder has files, the agent posts ``Files from business Ridgeline (#9) are kept in `/home/alice/.simplex-mcp/my-agent/files/group-9`: 3 files, 2.1 MB. /delete #9 files``. The files forwarded from #9 are deleted when the agent leaves it.
 
@@ -289,13 +290,14 @@ After `/approve #9 all`, the agent's messages to #9 are sent at once, and each o
 ```
 My Agent: I sent a message to business Ridgeline, where I am incognito:
           `Thanks, I'll order.`
-          Approved for this chat by Alice. /revoke #9
+          Approved for this chat by Alice. /revoke #9 or /copies #9 off
 ```
 
 - It covers messages, status messages and notes only: connecting and leaving are approved one by one.
 - It lasts until `/revoke`, until the chat is deleted, or until the approving owner is no longer an approver. It survives restarts: it is kept in the agent's database, as custom data of that chat.
 - With it, the agent can send anything it can read, without asking, to everyone in that chat.
 - It applies in mode `requests` only: in mode `host`, `list` and `/list` show no approvals.
+- `/copies #9 off` stops these copies, and `/copies #9 on` resumes them. The card of a failed send is still posted. The setting is kept in the chat's custom data, also after `/revoke`, so a later `/approve #9 all` replies with the line `Copies are off: /copies #9 on`.
 
 ### Receiving all files from a chat
 
@@ -537,7 +539,7 @@ register options:
 
 The folder is readable only by the user: every start sets its mode to 0700, except on Windows.
 
-The server keeps its action counter in the chat database, as custom data of the agent control chat, the approvals of all messages to a chat and of all files from it as custom data of that chat, and its actions in memory.
+The server keeps its action counter in the chat database, as custom data of the agent control chat, the approvals of all messages to a chat and of all files from it, and copies off, as custom data of that chat, and its actions in memory.
 
 The server keeps no log file: it writes its log to the terminal where `serve` runs, events to stdout and errors to stderr. Each note of a status message is written to stdout, for example `Note to contact Alice (@4): Reading the file…`.
 
@@ -550,7 +552,7 @@ One server runs per data folder: a second one exits, because two processes on on
 - Names written by peers are folded to one line, with control and format characters replaced by spaces, in the terminal and in the agent control chat; there, a name that is not a valid display name is shown as code.
 - Without `--owners`, whoever opens the link first becomes an owner. The link works once.
 - With `--owners`, only the listed owners approve.
-- After `/approve #N all`, the agent sends to that chat without asking, files included; `/revoke #N` ends it.
+- After `/approve #N all`, the agent sends to that chat without asking, files included; `/revoke #N` ends it. With `/copies #N off`, these messages are not copied to the agent control chat.
 - In such a chat, the status message and its notes are sent without asking and without a copy in the agent control chat; each note is written to the terminal. Everyone in the chat sees in the status line the names of the agent's running tools and of its model, the names of the files Claude Code reads and edits, without their folders, and the names of its other tools and subagent types, also for its work in other chats.
 - With the status hooks in scope `user`, Claude Code passes the events of every session of the user to curl, which posts them to the agent's server, with prompts, commands, file contents and tool results. The server uses only the fields named in [Status hooks](#status-hooks), keeps state only for the sessions that used the agent's tools, and logs nothing. curl ignores `.curlrc` files and proxy variables, so the events and the token are sent only to 127.0.0.1.
 - The server refuses to send private keys, its own files and the files under `~/.simplex-mcp`, where agents keep their data, except the files under `files/` of its own data folder; other files the agent can read are sent after approval.

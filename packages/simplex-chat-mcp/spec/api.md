@@ -373,7 +373,7 @@ Command ([`commandsOf`](../src/tools.ts#L1479-L1486), [schema](../src/tools.ts#L
 
 ### 1.9 Action refusals
 
-Refusals of a new `connect`, `send`, `download` or `leave` action, first match ([actions.ts:172-177](../src/actions.ts#L172-L177), [control.ts:119-128](../src/control.ts#L119-L128)):
+Refusals of a new `connect`, `send`, `download` or `leave` action, first match ([actions.ts:172-177](../src/actions.ts#L172-L177), [control.ts:120-129](../src/control.ts#L120-L129)):
 
 | Text | Condition |
 |---|---|
@@ -387,9 +387,9 @@ Refusals of a new `connect`, `send`, `download` or `leave` action, first match (
 | `The agent has no owner. The person who runs it has to join its control chat with the link the server printed.` | no approver, `--owners` absent |
 | `The agent has no approving owner. The person who runs it has to restart it with the --owners options it printed.` | no approver, `--owners` given |
 
-Largest card form ([control.ts:622-630](../src/control.ts#L622-L630)): the maximum of the creation form, the `done` form and a `failed` form with an error of 600 × `€`, with the action's own decider or the longest current approver name; each form is measured as JSON-escaped UTF-8: `"`, `\`, `\n`, `\r`, `\t` 2 bytes, other characters below U+0020 6 bytes.
+Largest card form ([control.ts:636-644](../src/control.ts#L636-L644)): the maximum of the creation form, the `done` form and a `failed` form with an error of 600 × `€`, with the action's own decider or the longest current approver name; each form is measured as JSON-escaped UTF-8: `"`, `\`, `\n`, `\r`, `\t` 2 bytes, other characters below U+0020 6 bytes.
 
-Link texts of a `connect` card ([control.ts:122](../src/control.ts#L122), [:644-658](../src/control.ts#L644-L658)): the description and welcome lines take the bytes that the largest form leaves without them. Lines are kept while they fit; the next line is cut to the bytes left and ends in `…`; later lines are left out. The tool result keeps both texts whole.
+Link texts of a `connect` card ([control.ts:123](../src/control.ts#L123), [:658-672](../src/control.ts#L658-L672)): the description and welcome lines take the bytes that the largest form leaves without them. Lines are kept while they fit; the next line is cut to the bytes left and ends in `…`; later lines are left out. The tool result keeps both texts whole.
 
 ### 1.10 Status message
 
@@ -477,7 +477,7 @@ At start, before the HTTP listener, each eligible chat is read in pages of 100 i
 
 ### 2.1 Commands and replies
 
-Accepted text ([`parseCommand`](../src/control.ts#L545-L550), [`ownerRequest`](../src/control.ts#L710-L723)):
+Accepted text ([`parseCommand`](../src/control.ts#L559-L564), [`ownerRequest`](../src/control.ts#L728-L742)):
 
 ```
 message   one line, an optional trailing newline
@@ -498,6 +498,8 @@ requests
   forward CHAT N
   approve CHAT all
   revoke CHAT
+  copies CHAT off
+  copies CHAT on
   leave CHAT
   delete CHAT files
   pending
@@ -534,11 +536,11 @@ The server reads commands from members' messages in the main conversation of the
 
 KIND is `contact`, `bot`, `agent`, `business`, `group` or `channel` ([tools.ts:1428-1435](../src/tools.ts#L1428-L1435)). WHAT is `connect to SUBJECT`, `send to SUBJECT`, `download NAME from SUBJECT`, `delete SUBJECT` or `leave SUBJECT` ([actions.ts:315-327](../src/actions.ts#L315-L327)). SIZE is in bytes, KB, MB or GB, by 1000, with one decimal ([control.ts:670-673](../src/control.ts#L670-L673)). Names are shown by `safeName` ([control.ts:687-690](../src/control.ts#L687-L690)).
 
-A standing approval is stored in the chat's custom data, `simplexMcp` for messages and `simplexMcpFiles` for files, as `{approvedBy, approvedById, approvedAt}`; it applies in mode `requests` while member `approvedById` is an approver ([control.ts:22-25](../src/control.ts#L22-L25), [:130-133](../src/control.ts#L130-L133)).
+A standing approval is stored in the chat's custom data, `simplexMcp` for messages and `simplexMcpFiles` for files, as `{approvedBy, approvedById, approvedAt}`; it applies in mode `requests` while member `approvedById` is an approver ([control.ts:22-25](../src/control.ts#L22-L25), [:131-134](../src/control.ts#L131-L134)).
 
 ### 2.2 Cards
 
-Card text: request lines, then one last line ([`cardText`](../src/control.ts#L552-L571), [`requestLines`](../src/control.ts#L573-L601)).
+Card text: request lines, then one last line ([`cardText`](../src/control.ts#L566-L585), [`requestLines`](../src/control.ts#L587-L615)).
 
 Request lines:
 
@@ -551,7 +553,7 @@ Request lines:
 
 SUBJECT is `KIND NAME`, or `an unnamed KIND`, followed by ` (SIMPLEX_NAME)` when known ([actions.ts:310-313](../src/actions.ts#L310-L313)). For `connect`, SIMPLEX_NAME is the target when it is a name; for `send`, the chat's verified SimpleX name.
 
-A card of a `send` with an image or video file, or of a `download` of an image or video, is an image or video message with the file's preview and the card text as its caption; the preview is resized to fit the card, and the card is text when it can't be resized ([control.ts:441-461](../src/control.ts#L441-L461)).
+A card of a `send` with an image or video file, or of a `download` of an image or video, is an image or video message with the file's preview and the card text as its caption; the preview is resized to fit the card, and the card is text when it can't be resized ([control.ts:455-475](../src/control.ts#L455-L475)).
 
 Last line:
 
@@ -560,15 +562,15 @@ Last line:
 | `pending` | | command line |
 | `pending` | interrupted | `Cancelled: the server stopped.` |
 | `performing` | interrupted | `DECIDER; interrupted: the server stopped.` |
-| `done` | standing | `Approved for this chat by NAME. /'revoke CHAT'` |
+| `done` | standing | `Approved for this chat by NAME. /'revoke CHAT' or /'copies CHAT off'` |
 | `done` | | `DECIDER.` |
 | `failed` | | ``DECIDER; failed: `ERROR`.`` |
 | `rejected` | | `Rejected by NAME.` |
 | `expired` | | `Expired.` |
 
-DECIDER is `Performed without approval (mode host)` in mode `host`, `Approved for this chat by NAME` for a standing action, and `Approved by NAME` otherwise ([control.ts:554](../src/control.ts#L554)).
+DECIDER is `Performed without approval (mode host)` in mode `host`, `Approved for this chat by NAME` for a standing action, and `Approved by NAME` otherwise ([control.ts:568](../src/control.ts#L568)).
 
-Command lines ([`commandsLine`](../src/control.ts#L603-L616)):
+Command lines ([`commandsLine`](../src/control.ts#L617-L630)):
 
 | Tool | Command line |
 |---|---|
@@ -579,7 +581,7 @@ Command lines ([`commandsLine`](../src/control.ts#L603-L616)):
 
 The app shows `/'approve N'` as the tappable command `/approve N` ([PLAN, What the owner sees](../PLAN.md#what-the-owner-sees-the-agent-control-chat)).
 
-An action performed without a card, in mode `host` or under a standing approval, gets its outcome as a new message; a `download` without a card gets none ([control.ts:145-152](../src/control.ts#L145-L152), [:495-497](../src/control.ts#L495-L497)).
+An action performed without a card, in mode `host` or under a standing approval, gets its outcome as a new message; a `download` without a card gets none, and neither does a `done` standing send to a chat with copies off ([control.ts:146-153](../src/control.ts#L146-L153), [:509-511](../src/control.ts#L509-L511)).
 
 ### 2.3 Other posts
 
@@ -592,27 +594,27 @@ An action performed without a card, in mode `host` or under a standing approval,
 
 ### 2.4 Membership messages
 
-Posted in the chat and logged; in the chat, names are shown by `safeName` and the `--owners ...` part is a code span; in the log, names are folded to one line ([control.ts:427-430](../src/control.ts#L427-L430), [:78-79](../src/control.ts#L78-L79)).
+Posted in the chat and logged; in the chat, names are shown by `safeName` and the `--owners ...` part is a code span; in the log, names are folded to one line ([control.ts:441-444](../src/control.ts#L441-L444), [:79-80](../src/control.ts#L79-L80)).
 
 | Situation | Text | Code |
 |---|---|---|
-| owner joined, `--owners` absent | `I'm your agent. I ask here before I connect, send, download a file or leave a chat.` (chat only) | [control.ts:31](../src/control.ts#L31), [:375](../src/control.ts#L375) |
-| member joined, `--owners` without a list | `NAME joined (member ID). Restart the server with --owners ENTRIES` | [control.ts:380-383](../src/control.ts#L380-L383) |
-| start with `--owners` without a list and humans present | `A joined (member ID). B joined (member ID). Restart the server with --owners ENTRIES` | [control.ts:347-350](../src/control.ts#L347-L350) |
-| a human became owner outside the list | `NAME (member ID) is now an owner and can't approve actions yet. Restart the server with --owners ENTRIES` | [control.ts:388-392](../src/control.ts#L388-L392) |
-| a listed owner stopped being a human owner | `NAME (member ID) is no longer an owner. Restart the server with --owners ENTRIES`<br>none remains: `NAME (member ID) is no longer an owner. No owners remain: restart the server with --reset-owners --owners` | [control.ts:393-398](../src/control.ts#L393-L398) |
+| owner joined, `--owners` absent | `I'm your agent. I ask here before I connect, send, download a file or leave a chat.` (chat only) | [control.ts:31](../src/control.ts#L31), [:389](../src/control.ts#L389) |
+| member joined, `--owners` without a list | `NAME joined (member ID). Restart the server with --owners ENTRIES` | [control.ts:394-397](../src/control.ts#L394-L397) |
+| start with `--owners` without a list and humans present | `A joined (member ID). B joined (member ID). Restart the server with --owners ENTRIES` | [control.ts:361-364](../src/control.ts#L361-L364) |
+| a human became owner outside the list | `NAME (member ID) is now an owner and can't approve actions yet. Restart the server with --owners ENTRIES` | [control.ts:402-406](../src/control.ts#L402-L406) |
+| a listed owner stopped being a human owner | `NAME (member ID) is no longer an owner. Restart the server with --owners ENTRIES`<br>none remains: `NAME (member ID) is no longer an owner. No owners remain: restart the server with --reset-owners --owners` | [control.ts:407-412](../src/control.ts#L407-L412) |
 
-ENTRIES: `ID:NAME` of each human, or of each human owner, joined by commas; an entry with characters other than letters, digits, `_` and `-` is quoted for the shell ([control.ts:774-784](../src/control.ts#L774-L784)).
+ENTRIES: `ID:NAME` of each human, or of each human owner, joined by commas; an entry with characters other than letters, digits, `_` and `-` is quoted for the shell ([control.ts:793-803](../src/control.ts#L793-L803)).
 
 ### 2.5 Group profile
 
 | Field | Value | Code |
 |---|---|---|
-| display name | the agent's display name, updated at start when it differs | [control.ts:105-107](../src/control.ts#L105-L107) |
-| full name | empty | [control.ts:512](../src/control.ts#L512) |
-| description | `Supervise your AI agent here: approve or reject its connections and messages with one tap.` | [control.ts:513](../src/control.ts#L513) |
-| history | on | [control.ts:514](../src/control.ts#L514) |
-| command menu | `/pending` "Pending actions"<br>`/list` "Chats and approvals"<br>`/leave` "Leave a chat", params `<chat ID>`<br>updated at start when it differs | [control.ts:10-14](../src/control.ts#L10-L14), [:105-107](../src/control.ts#L105-L107) |
+| display name | the agent's display name, updated at start when it differs | [control.ts:106-108](../src/control.ts#L106-L108) |
+| full name | empty | [control.ts:526](../src/control.ts#L526) |
+| description | `Supervise your AI agent here: approve or reject its connections and messages with one tap.` | [control.ts:527](../src/control.ts#L527) |
+| history | on | [control.ts:528](../src/control.ts#L528) |
+| command menu | `/pending` "Pending actions"<br>`/list` "Chats and approvals"<br>`/leave` "Leave a chat", params `<chat ID>`<br>updated at start when it differs | [control.ts:10-14](../src/control.ts#L10-L14), [:106-108](../src/control.ts#L106-L108) |
 
 ---
 
