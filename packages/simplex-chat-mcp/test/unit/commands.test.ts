@@ -1048,7 +1048,7 @@ describe("the agent's model", () => {
     const options: ServeOptions = {name: "agent", data: folder, dataGiven: true, approve: "requests", expireHours: 23, resetOwners: false, newToken: false, port: 5226, qrCode: "small", stopWait: 10, model: {models, file: join(data, "missing", "model")}}
     const error = await startServer(options).catch((reason: unknown) => reason)
     expect((error as NodeJS.ErrnoException).code).toBe("ENOENT")
-    expect(readdirSync(folder).sort()).toEqual(["headers.json", "token"])
+    expect(readdirSync(folder).sort()).toEqual(["headers.json", "hook-headers", "token"])
   })
 })
 
