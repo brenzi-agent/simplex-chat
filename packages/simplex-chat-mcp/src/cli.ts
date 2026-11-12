@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import {homedir} from "os"
-import {join, resolve} from "path"
+import {dirname, join, resolve, sep} from "path"
 import {Mode} from "./actions"
+import {ModelEntry} from "./files"
 import {ExitError, log, logError} from "./log"
 import {validName} from "./messages"
 import {RegisterOptions, Scope, register} from "./register"
@@ -33,6 +34,12 @@ serve options:
                          state and tokens per second shown in status messages;
                          the API key, if any, is read from
                          SIMPLEX_MCP_INFERENCE_KEY; mode requests only
+  --models MODELS        opencode models NAME=PROVIDER/MODEL, comma-separated;
+                         /model NAME selects one in the agent control chat;
+                         the first is the default; requires --model-file
+  --model-file FILE      file with the selected PROVIDER/MODEL for the script
+                         that runs opencode; in a folder disjoint from the
+                         data folder
 
 register options:
   --scope SCOPE          user (default) or local
@@ -68,6 +75,8 @@ function serveOptions(name: string, options: OptionReader, home: string): ServeO
     stopWait: 10,
     dataGiven: false,
   }
+  let models: ModelEntry[] | undefined
+  let modelFile: string | undefined
   for (let option = options.next(); option !== undefined; option = options.next()) {
     switch (option) {
       case "--data":
@@ -104,6 +113,12 @@ function serveOptions(name: string, options: OptionReader, home: string): ServeO
       case "--inference":
         serve.inference = inferenceUrl(options.value(option))
         break
+      case "--models":
+        models = modelList(options.value(option))
+        break
+      case "--model-file":
+        modelFile = resolve(options.value(option))
+        break
       default:
         throw unknownOption(option)
     }
@@ -114,6 +129,10 @@ function serveOptions(name: string, options: OptionReader, home: string): ServeO
   if (serve.inference !== undefined && serve.approve === "host") {
     throw usageError("--inference: status messages are shown only in mode requests.")
   }
+  if (models !== undefined && modelFile !== undefined) serve.model = {models, file: modelFile}
+  else if (models !== undefined || modelFile !== undefined) throw usageError("--models and --model-file: both expected.")
+  const within = (folder: string, path: string): boolean => join(path, sep).startsWith(join(folder, sep))
+  if (modelFile !== undefined && (within(serve.data, modelFile) || within(dirname(modelFile), serve.data))) throw usageError(`--model-file: a file in a folder disjoint from the data folder expected, got ${modelFile}`)
   return serve
 }
 
@@ -191,6 +210,14 @@ function ownerEntry(entry: string): OwnerEntry {
   const match = /^([1-9]\d*):(.+)$/.exec(entry)
   if (!match) throw usageError(`--owners: ID:NAME expected, got ${entry}`)
   return {memberId: Number(match[1]), name: match[2]}
+}
+
+function modelList(value: string): ModelEntry[] {
+  const matches = value.split(",").map(item => /^([a-z][a-z0-9-]{0,15})=([A-Za-z0-9][\w.-]{0,31}\/[\w.:/+@-]{1,64})$/.exec(item))
+  const names = new Set(matches.map(match => match?.[1]))
+  const values = new Set(matches.map(match => match?.[2]))
+  if (matches.includes(null) || names.size < matches.length || values.size < matches.length) throw usageError(`--models: NAME=PROVIDER/MODEL,... expected, got ${value}`)
+  return matches.map(match => ({name: match![1], model: match![2]}))
 }
 
 function integer(option: string, value: string, min: number, max: number, expected: string): number {

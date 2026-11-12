@@ -7,7 +7,7 @@ import {api, util} from "simplex-chat"
 import {Action, Actions, Mode} from "./actions"
 import {Activity} from "./activity"
 import {Control, controlDataOf, createControlChat, findControlGroup, hasOutcomeCard, isControlEvent, resetControlChat} from "./control"
-import {acquireLock, createDataFolder, releaseLock, serverToken, writeHeadersFile, writeServerFile} from "./files"
+import {ModelOptions, ModelSelection, acquireLock, createDataFolder, modelAtStart, releaseLock, serverToken, writeHeadersFile, writeServerFile} from "./files"
 import {startHttp, stopHttp} from "./http"
 import {inferencePoller} from "./inference"
 import {ExitError, log, logError, shellPath} from "./log"
@@ -39,6 +39,7 @@ export interface ServeOptions {
   qrCode: QrCodeSize
   stopWait: number
   inference?: string
+  model?: ModelOptions
 }
 
 export interface RunningServer {
@@ -75,13 +76,15 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
   try {
     const token = serverToken(data, options.newToken)
     writeHeadersFile(data, token)
+    const model = options.model === undefined ? undefined : modelAtStart(options.model)
     const chat = await api.ChatApi.init({type: "sqlite", filePrefix: join(data, "simplex")})
     log(`SimpleX MCP server ${fullVersion}, agent "${name}"`)
     log(`Data folder: ${data}`)
     log(`Approval mode: ${options.approve}`)
     if (options.inference !== undefined) log(`Inference endpoint: ${options.inference}`)
+    if (model !== undefined) log(`Model: ${model.selected.name} (${model.selected.model}), in ${model.file}`)
     try {
-      return await startAgent(chat, options, token, inference)
+      return await startAgent(chat, options, token, inference, model)
     } catch (error) {
       await chat.close().catch(() => undefined)
       throw error
@@ -92,7 +95,7 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
   }
 }
 
-async function startAgent(chat: api.ChatApi, options: ServeOptions, token: string, inference: ReturnType<typeof inferencePoller> | undefined): Promise<RunningServer> {
+async function startAgent(chat: api.ChatApi, options: ServeOptions, token: string, inference: ReturnType<typeof inferencePoller> | undefined, model: ModelSelection | undefined): Promise<RunningServer> {
   const {name, data, port, approve, expireHours} = options
   const created = (await chat.apiGetActiveUser()) ?? (await chat.apiCreateActiveUser({displayName: options.displayName ?? name, fullName: "", peerType: T.ChatPeerType.Agent}))
   const networkConfig = await chat.apiGetNetworkConfig()
@@ -115,7 +118,7 @@ async function startAgent(chat: api.ChatApi, options: ServeOptions, token: strin
   const activity = new Activity(name)
   const schedules = new Schedules(memberId => control.hasApprover(memberId))
   const tools = new AgentTools({chat, user, actions, watch, controlChat: () => control.chatRef, standingApprover: (chatInfo, standing) => control.standingApprover(chatInfo, standing), refusedFile: (path, chatInfo, chat) => control.refusedFile(path, chatInfo, chat), data, inference, activity, schedules}, approve)
-  const control: Control = new Control(chat, group, {displayName, owners: options.owners, registerHint: registerHint(options), qrCode: options.qrCode}, actions, tools, schedules)
+  const control: Control = new Control(chat, group, {displayName, owners: options.owners, registerHint: registerHint(options), qrCode: options.qrCode, model}, actions, tools, schedules)
   await control.load()
   await tools.deleteLeftoverStatuses().catch(error => logError("status messages", error))
   const factory = (): McpServer => {
