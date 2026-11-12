@@ -540,28 +540,28 @@ Add an entry with the URL `http://127.0.0.1:5226/mcp` and the header `Authorizat
 With `--models` and `--model-file`, an owner selects the model of an agent that a script runs in opencode. The server only writes the selected model to the file; the script restarts the agent.
 
 ```
-npx -y @simplex-chat/mcp serve kodiak --models gemma=kodiak/gemma-4-26b,glm=privatemode/glm-latest,flash=privatemode/glm-flash-latest --model-file /run/agent-model/model
+npx -y @simplex-chat/mcp serve my-agent --models gemma=llama-swap/gemma-4-26b,coder=llama-swap/qwen3-coder-next,large=hosted/large-latest --model-file /run/agent-model/model
 ```
 
 - Each item of `--models` is `NAME=PROVIDER/MODEL`. Owners type NAME; opencode's `--model` takes PROVIDER/MODEL.
 - NAME: 1 to 16 lowercase letters, digits and hyphens, starting with a letter. PROVIDER: 1 to 32 letters, digits, `_`, `.` and `-`, starting with a letter or digit. MODEL: 1 to 64 letters, digits and `_.:/+@-`.
 - Names are unique, and so are PROVIDER/MODEL values. The first item is the default.
-- The start prints `Model: gemma (kodiak/gemma-4-26b), in /run/agent-model/model`.
+- The start prints `Model: gemma (llama-swap/gemma-4-26b), in /run/agent-model/model`.
 
 In the agent control chat:
 
 ```
-/model        The agent's model is `gemma`: `kodiak/gemma-4-26b`.
-              /model glm
-              /model flash
-/model glm    The agent's model is `glm`: `privatemode/glm-latest`. The agent restarts with it. /model gemma
+/model        The agent's model is `gemma`: `llama-swap/gemma-4-26b`.
+              /model coder
+              /model large
+/model coder  The agent's model is `coder`: `llama-swap/qwen3-coder-next`. The agent restarts with it. /model gemma
 /model gemma  The agent's model is already `gemma`.
 /model gpt    No such model. /model shows the models.
 ```
 
 - Only approvers select a model, in both approval modes. The command at the end of a switch reply selects the previous model.
 - With `--models`, `/model` is in the chat's command menu. Without it, `/model` replies `This server runs without --models.`
-- A switch is logged: `Model set to glm (privatemode/glm-latest) by Alice.`
+- A switch is logged: `Model set to coder (llama-swap/qwen3-coder-next) by Alice.`
 
 The file of `--model-file`, FILE:
 

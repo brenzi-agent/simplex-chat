@@ -56,19 +56,19 @@ describe("serve options", () => {
       newToken: true,
       resetOwners: true,
       owners: [],
-      model: {models: [{name: "gemma", model: "kodiak/gemma-4-26b"}], file: "/tmp/model/model"},
+      model: {models: [{name: "gemma", model: "llama-swap/gemma-4-26b"}], file: "/tmp/model/model"},
     })
   })
 
   it("takes the models with their file, resolved to an absolute path", () => {
-    const models = "gemma=kodiak/gemma-4-26b,glm=privatemode/glm-latest,flash=privatemode/glm-flash-latest"
+    const models = "gemma=llama-swap/gemma-4-26b,coder=llama-swap/qwen3-coder-next,large=hosted/large-latest"
     expect(parseCommand(["serve", "agent", "--model-file", "agent-model/model", "--models", models], home)).toMatchObject({
       options: {
         model: {
           models: [
-            {name: "gemma", model: "kodiak/gemma-4-26b"},
-            {name: "glm", model: "privatemode/glm-latest"},
-            {name: "flash", model: "privatemode/glm-flash-latest"},
+            {name: "gemma", model: "llama-swap/gemma-4-26b"},
+            {name: "coder", model: "llama-swap/qwen3-coder-next"},
+            {name: "large", model: "hosted/large-latest"},
           ],
           file: join(process.cwd(), "agent-model", "model"),
         },
@@ -82,20 +82,20 @@ describe("serve options", () => {
 
   it("refuses models that are not NAME=PROVIDER/MODEL items with unique names and models", () => {
     const refused = [
-      "kodiak/gemma-4-26b",
-      "gemma=kodiak",
-      "gemma=-kodiak/gemma-4-26b",
-      "-gemma=kodiak/gemma-4-26b",
-      "Gemma=kodiak/gemma-4-26b",
-      `${"g".repeat(17)}=kodiak/gemma-4-26b`,
+      "llama-swap/gemma-4-26b",
+      "gemma=llama-swap",
+      "gemma=-llama-swap/gemma-4-26b",
+      "-gemma=llama-swap/gemma-4-26b",
+      "Gemma=llama-swap/gemma-4-26b",
+      `${"g".repeat(17)}=llama-swap/gemma-4-26b`,
       `gemma=${"p".repeat(33)}/gemma-4-26b`,
-      `gemma=kodiak/${"m".repeat(65)}`,
-      "gemma=kodiak/gemma 4",
-      "gemma=kodiak/`gemma`",
-      "gemma=kodiak/gemma-4-26b,",
-      "gemma=kodiak/gemma-4-26b,,glm=privatemode/glm-latest",
-      "gemma=kodiak/gemma-4-26b,gemma=privatemode/glm-latest",
-      "gemma=kodiak/gemma-4-26b,glm=kodiak/gemma-4-26b",
+      `gemma=llama-swap/${"m".repeat(65)}`,
+      "gemma=llama-swap/gemma 4",
+      "gemma=llama-swap/`gemma`",
+      "gemma=llama-swap/gemma-4-26b,",
+      "gemma=llama-swap/gemma-4-26b,,coder=llama-swap/qwen3-coder-next",
+      "gemma=llama-swap/gemma-4-26b,gemma=llama-swap/qwen3-coder-next",
+      "gemma=llama-swap/gemma-4-26b,coder=llama-swap/gemma-4-26b",
       "",
     ]
     for (const models of refused) {
@@ -105,12 +105,12 @@ describe("serve options", () => {
   })
 
   it("takes --models and --model-file only together", () => {
-    expect(usage(["serve", "agent", "--models", "gemma=kodiak/gemma-4-26b"])).toBe("--models and --model-file: both expected.")
+    expect(usage(["serve", "agent", "--models", "gemma=llama-swap/gemma-4-26b"])).toBe("--models and --model-file: both expected.")
     expect(usage(["serve", "agent", "--model-file", "/tmp/model"])).toBe("--models and --model-file: both expected.")
   })
 
   it("refuses a model file in a folder not disjoint from the data folder", () => {
-    const models = ["--models", "gemma=kodiak/gemma-4-26b"]
+    const models = ["--models", "gemma=llama-swap/gemma-4-26b"]
     for (const file of ["/home/alice/.simplex-mcp/agent/model", "/home/alice/.simplex-mcp/agent", "/home/alice/.simplex-mcp/model"]) {
       expect(usage(["serve", "agent", ...models, "--model-file", file])).toBe(`--model-file: a file in a folder disjoint from the data folder expected, got ${file}`)
     }
