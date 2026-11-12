@@ -14,10 +14,12 @@ const controlCommands: T.ChatBotCommand[] = [
   {type: "command", keyword: "list", label: "Chats and approvals"},
   {type: "command", keyword: "schedules", label: "Scheduled prompts"},
   {type: "command", keyword: "leave", label: "Leave a chat", params: "<chat ID>"},
+  {type: "command", keyword: "help", label: "Help"},
 ]
 const modelCommand: T.ChatBotCommand = {type: "command", keyword: "model", label: "The agent's model"}
 
-const commandsReply = "Commands: /approve, /reject, /receive, /forward, /revoke, /copies, /leave, /delete, /pending, /list, /schedule, /unschedule, /schedules, /model. Each card shows its commands."
+const commandsReply = "Commands: /approve, /reject, /receive, /forward, /revoke, /copies, /leave, /delete, /pending, /list, /schedule, /unschedule, /schedules, /model, /help. Each card shows its commands."
+const noHelp = "No help for that. /help lists the commands."
 const cardTooLong = {
   send: "text: too long for its approval card; shorten it.",
   connect: "message: too long for its approval card; shorten it.",
@@ -46,6 +48,78 @@ const lightHalfCell = "\x1b[47m "
 const darkTopCell = "\x1b[37;40m▄"
 const darkBottomCell = "\x1b[30;47m▄"
 const resetColors = "\x1b[0m"
+
+const commandsHelp = `/'approve N' or /'approve CHAT N' performs pending action N, other than a download; /'approve CHAT all' approves all sends to CHAT.
+/'reject N' or /'reject CHAT N' rejects pending action N.
+/'receive CHAT N' downloads the file of pending download N; /'receive CHAT N all' also approves later files from CHAT on the agent's XFTP servers.
+/'forward CHAT N' sends you the file of pending download N here.
+/'revoke CHAT' ends the approval of all sends to CHAT.
+/'copies CHAT off' or /'copies CHAT on' turns off or on the copies here of the agent's approved sends to CHAT.
+/'leave CHAT' leaves the group or deletes the contact CHAT.
+/'delete CHAT files' deletes the agent's files from CHAT.
+/pending lists the pending actions.
+/list lists the agent's chats and their approvals.
+/'schedule CHAT CRON PROMPT' schedules a prompt for the agent in CHAT.
+/'unschedule CHAT N' removes schedule N of CHAT.
+/schedules lists the schedules of all chats.
+/model shows the agent's model; /'model NAME' switches it.
+/'help COMMAND' shows how to use COMMAND, such as /'help schedule'.`
+const approveHelp = `/'approve N' performs pending action N: a connect, send or leave. /'reject N' rejects pending action N, a download too. Its card then shows the outcome.
+/'approve CHAT N' and /'reject CHAT N' do the same for an action of CHAT, as its card shows.
+/'approve CHAT all' performs the pending sends to CHAT; later ones are performed at once and posted here, while you approve actions, until /'revoke CHAT'. It applies in mode requests only.
+N: the number on the card and in /pending. CHAT: a chat ID from /list, such as \`#3\`.
+Example: \`/approve #3 12\`. Related: /'help receive', /'help revoke'.`
+const receiveHelp = `/'receive CHAT N' downloads the file of pending download N for the agent.
+/'receive CHAT N all' does the same, and later downloads from CHAT of files on the agent's XFTP servers are performed at once, without a card, while you approve actions. /'receive CHAT off' ends that. A file whose download was rejected or expired can get a card again.
+/'forward CHAT N' downloads the file and sends it to you here; its card stays pending, and the agent gets nothing.
+N: the number on the card. CHAT: the chat the card names.
+Example: \`/receive #3 7\`. Related: /'help reject', /'help delete'.`
+const revokeHelp = `/'revoke CHAT' ends the approval of all sends to CHAT given with /'approve CHAT all': each later send to CHAT needs approval again.
+/'receive CHAT off' ends the approval of all files from CHAT in the same way.
+Example: \`/revoke #3\`. Related: /list, /'help approve'.`
+const copiesHelp = `/'copies CHAT off' stops the copies here of the agent's sends to CHAT that /'approve CHAT all' performs; a failed send is still posted. /'copies CHAT on' turns them on again.
+/list shows \`copies off\` for such a chat in mode requests.
+Example: \`/copies #3 off\`. Related: /'help approve', /'help revoke'.`
+const leaveHelp = `/'leave CHAT' makes the agent leave the group CHAT, or delete the contact CHAT, at once; the chat is deleted with its messages and schedules, and its pending actions are rejected.
+The files downloaded for the agent from CHAT are kept until /'delete CHAT files'.
+Example: \`/leave #3\`. Related: /list.`
+const deleteHelp = `/'delete CHAT files' deletes the files downloaded from CHAT, forwarded ones too, and cancels its running downloads, also for a chat the agent left.
+Example: \`/delete #3 files\`. Related: /'help leave'.`
+const pendingHelp = `/pending lists the pending actions, one line each: number, request and expiry time, such as \`5  send to bot SimpleX Directory  expires 2026-11-12 18:00 UTC\`.
+Each card shows the commands of its action. Related: /'help approve'.`
+const listHelp = `/list lists the agent's ${listedChats} most recent chats, one line each, such as \`#3  group Builders, approved for this chat by Alice\`; a chat the agent is not connected to shows \`not connected\`.
+CHAT in the other commands is a chat ID in this form, \`#N\` or \`@N\`. Related: /'help approve', /'help leave'.`
+const scheduleHelp = `/'schedule CHAT CRON PROMPT' makes PROMPT due for the agent in CHAT at each minute that CRON matches, in the server's time zone; the reply shows its UTC offset.
+CRON: 5 fields, minute 0-59, hour 0-23, day of month 1-31, month 1-12 and day of week 0-7, with 0 and 7 for Sunday.
+A field is \`*\`, \`N\`, \`A-B\`, \`*/S\` or \`A-B/S\`, or a comma list of them. When neither day field starts with \`*\`, a match of either one suffices.
+CHAT: a chat ID from /list. PROMPT: the rest of the line, at most ${maxPromptLength} characters. A chat has at most ${maxSchedules} schedules.
+The agent's \`receive\` of CHAT returns a due prompt once; until then, the later times of its schedule are skipped, and it is lost when the server stops.
+An owner who approves actions adds a schedule, and its prompts become due only while that owner approves actions.
+/'unschedule CHAT N' removes schedule N of CHAT and renumbers the later ones. /schedules lists up to ${listedSchedules} schedules of all chats.
+Example: \`/schedule #3 0 7 * * 1-5 Post the trail report.\`, at 07:00 on weekdays.`
+const modelHelp = `/model shows the agent's model and a command for each other model.
+/'model NAME' selects NAME, one of the names given with --models; the script that runs the agent restarts it with that model.
+A server without --models refuses both. Example: \`/model glm\`.`
+const helpHelp = `/help lists the commands. /'help COMMAND' shows how to use COMMAND, written with or without its \`/\`, such as /'help schedule'.
+Every member who can post in this chat may use /help; the other commands are for the owners who approve actions.`
+const helpTexts = new Map<string, string>([
+  ["", commandsHelp],
+  ["approve", approveHelp],
+  ["reject", approveHelp],
+  ["receive", receiveHelp],
+  ["forward", receiveHelp],
+  ["revoke", revokeHelp],
+  ["copies", copiesHelp],
+  ["leave", leaveHelp],
+  ["delete", deleteHelp],
+  ["pending", pendingHelp],
+  ["list", listHelp],
+  ["schedule", scheduleHelp],
+  ["unschedule", scheduleHelp],
+  ["schedules", scheduleHelp],
+  ["model", modelHelp],
+  ["help", helpHelp],
+])
 
 export interface ControlData {
   control: true
@@ -81,6 +155,7 @@ type OwnerRequest =
   | {type: "unschedule"; chat: string; n: number}
   | {type: "pending" | "list" | "schedules"}
   | {type: "model"; name?: string}
+  | {type: "help"; topic: string}
 
 interface Shown {
   name: (name: string) => string
@@ -228,6 +303,7 @@ export class Control implements Pick<ActionHooks, "refusal" | "saveCounter" | "p
     this.actions.expireDue()
     const request = ownerRequest(command)
     if (request === undefined) return commandsReply
+    if (request.type === "help") return helpTexts.get(request.topic) ?? noHelp
     if (!this.isApprover(sender)) return this.options.owners === undefined ? "Only owners approve actions." : "Only the owners listed in --owners approve actions."
     switch (request.type) {
       case "pending": {
@@ -836,6 +912,7 @@ function ownerRequest({keyword, params}: Command): OwnerRequest | undefined {
   if (keyword === "delete" && chat !== undefined && value === "files") return {type: "deleteFiles", chat}
   if ((keyword === "pending" || keyword === "list" || keyword === "schedules") && words.length === 0) return {type: keyword}
   if (keyword === "model" && words.length <= 1) return {type: keyword, name: words.at(0)}
+  if (keyword === "help") return {type: keyword, topic: params.replace(/^\/(?=.)/, "")}
   return undefined
 }
 
