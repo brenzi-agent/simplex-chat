@@ -72,6 +72,8 @@ To prompt it on a schedule, send in "My Agent", with your chat's ID from `/list`
 
 `0 7 * * 1-5` is cron syntax for 07:00 on weekdays, server time. At that time the agent gets this prompt from its next `receive` in your chat, and answers you there. Send `/schedules` to list the schedules, and `/unschedule @5 1` to remove this one.
 
+In a new Claude Code session, give the same prompt again. The agent can recall the conversation: `receive` with `history` returns up to 50 earlier messages of that chat, its own answers included.
+
 ## Safety
 
 - The agent asks in "My Agent" before it connects, sends a message or a file, downloads a file or leaves; you approve or reject. On a download card, `/receive` gives the agent the file, and `/forward` sends it only to you.
