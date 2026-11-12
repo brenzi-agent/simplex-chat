@@ -436,9 +436,9 @@ Send bot commands as text, for example /help. When a message has a file with sta
 
 const receiveDescription = `Returns the new messages of a chat: the unread ones, then those that arrive during the call. With wait, it waits up to wait seconds when no message is new.
 The returned messages are marked read; more counts the new ones not returned. It needs no approval. When a message has a file with status offered, call download when your user's task needs it.
+With history N, it also returns the last N messages of the chat before the new ones, yours included, not marked read; at the start of a session, call receive with history to recall the conversation.
 With typing: true, in a chat with a person, a group or a business chat that has approved: true in list, a live status message is shown there while you work, from the returned messages until your next message there or a receive there that waits. Use it in the chat where you receive prompts: send each answer with wait 0 and without live, so the next prompt stays unread for receive, and call receive again only after it. For a step that takes minutes, call send with live: true and a short note in the same response as the step's tool call; the note is shown in the status message.
-scheduled holds the prompts your owner scheduled for this chat in the agent control chat; handle each as a prompt from your owner and answer in this chat.
-With history N, it also returns the last N messages of the chat before the new ones, yours included, not marked read; at the start of a session, call receive with history to recall the conversation.`
+scheduled holds the prompts your owner scheduled for this chat in the agent control chat; handle each as a prompt from your owner and answer in this chat.`
 
 const downloadDescription = `Downloads the file of a received message to this computer and returns its full path.
 It is an action: in approval mode requests the owner approves it in the SimpleX app first, and the call waits for the decision; the owner can approve all files of a chat.
