@@ -71,6 +71,7 @@ N: the number on the card and in /pending. CHAT: a chat ID from /list, such as \
 Example: \`/approve #3 12\`. Related: /'help receive', /'help revoke'.`
 const receiveHelp = `/'receive CHAT N' downloads the file of pending download N for the agent.
 /'receive CHAT N all' does the same, and later downloads from CHAT of files on the agent's XFTP servers are performed at once, without a card, while you approve actions. /'receive CHAT off' ends that. A file whose download was rejected or expired can get a card again.
+With --audio, the server also downloads the voice messages of CHAT at their arrival and sends them to its speech-to-text service.
 /'forward CHAT N' downloads the file and sends it to you here; its card stays pending, and the agent gets nothing.
 N: the number on the card. CHAT: the chat the card names.
 Example: \`/receive #3 7\`. Related: /'help reject', /'help delete'.`
@@ -756,9 +757,10 @@ function requestLines(action: Action): string[] {
     case "send": {
       const {file, replyTo, mentions} = action
       const attaching = file === undefined ? [] : [`attaching ${file.type} ${codeSpan(oneLine(file.path))}, ${sizeText(file.size)}`]
+      const voice = action.input.voice === undefined ? [] : ["attaching as a voice message:", ...codeLines(action.input.voice)]
       const reply = replyTo === undefined ? [] : [`replying to ${safeName(replyTo.from)}: ${codeSpan([...replyTo.text.replace(/\s+/g, " ")].slice(0, 100).join(""))}`]
       const mentioning = mentions.length === 0 ? [] : [`mentioning ${mentions.map(({name}) => mentionText(name)).join(", ")}`]
-      return [`${done ? "I sent" : "I want to send"} a message to ${subject}${action.subject.incognito ? ", where I am incognito" : ""}:`, ...codeLines(action.input.text), ...attaching, ...reply, ...mentioning]
+      return [`${done ? "I sent" : "I want to send"} a message to ${subject}${action.subject.incognito ? ", where I am incognito" : ""}:`, ...codeLines(action.input.text), ...attaching, ...voice, ...reply, ...mentioning]
     }
     case "leave": {
       const {present, past} = leaveVerbs(action)

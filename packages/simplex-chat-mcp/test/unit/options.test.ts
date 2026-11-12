@@ -39,7 +39,7 @@ describe("serve options", () => {
 
   it("reads every option", () => {
     const {options} = parseCommand(
-      ["serve", "agent-2", "--data", "/tmp/a", "--display-name", "Agent Two", "--approve", "host", "--expire", "1", "--stop-wait", "0", "--port", "5227", "--qr-code", "large", "--new-token", "--reset-owners", "--owners", "--models", "gemma=kodiak/gemma-4-26b", "--model-file", "/tmp/model/model"],
+      ["serve", "agent-2", "--data", "/tmp/a", "--display-name", "Agent Two", "--approve", "host", "--expire", "1", "--stop-wait", "0", "--port", "5227", "--qr-code", "large", "--audio", "http://127.0.0.1:8080,stt,tts,ana", "--new-token", "--reset-owners", "--owners", "--models", "gemma=kodiak/gemma-4-26b", "--model-file", "/tmp/model/model"],
       home,
     ) as {options: object}
     expect(options).toEqual({
@@ -52,6 +52,7 @@ describe("serve options", () => {
       stopWait: 0,
       port: 5227,
       qrCode: "large",
+      audio: {url: "http://127.0.0.1:8080", stt: "stt", tts: "tts", voice: "ana"},
       newToken: true,
       resetOwners: true,
       owners: [],
@@ -115,6 +116,16 @@ describe("serve options", () => {
     }
     expect(usage(["serve", "agent", "--model-file", "/tmp/a/model/model", ...models, "--data", "/tmp/a"])).toBe("--model-file: a file in a folder disjoint from the data folder expected, got /tmp/a/model/model")
     expect(parseCommand(["serve", "agent", "--data", "/tmp/a", ...models, "--model-file", "/tmp/ab/model"], home)).toMatchObject({options: {model: {file: "/tmp/ab/model"}}})
+  })
+
+  it("takes the audio API with its models and voice", () => {
+    const audio = (value: string): object | undefined => (parseCommand(["serve", "agent", "--audio", value], home) as {options: ServeOptions}).options.audio
+    expect(audio("http://127.0.0.1:8080/,stt,tts")).toEqual({url: "http://127.0.0.1:8080", stt: "stt", tts: "tts"})
+    expect(audio("https://audio.example.com/api//,whisper,kokoro,af_heart")).toEqual({url: "https://audio.example.com/api", stt: "whisper", tts: "kokoro", voice: "af_heart"})
+    for (const value of ["http://h,stt", "http://h,stt,tts,ana,extra", "http://h,,tts", "ftp://h,stt,tts", "http://u:p@h,stt,tts", "h:8080,stt,tts"]) {
+      expect(usage(["serve", "agent", "--audio", value])).toBe(`--audio: URL,STT,TTS or URL,STT,TTS,VOICE with an http or https URL expected, got ${value}`)
+    }
+    expect(usage(["serve", "agent", "--audio"])).toBe("--audio: a value expected.")
   })
 
   it("takes the QR code size", () => {
@@ -242,6 +253,9 @@ describe("help", () => {
     expect(helpText).toContain("  --inference URL        poll llama-swap or llama-server at URL for the model\n                         state and tokens per second shown in status messages;\n                         the API key, if any, is read from\n                         SIMPLEX_MCP_INFERENCE_KEY; mode requests only\n")
     expect(helpText).toContain("  --models MODELS        opencode models NAME=PROVIDER/MODEL, comma-separated;\n                         /model NAME selects one in the agent control chat;\n                         the first is the default; requires --model-file\n")
     expect(helpText).toContain("  --model-file FILE      file with the selected PROVIDER/MODEL for the script\n                         that runs opencode; in a folder disjoint from the\n                         data folder\n")
+    expect(helpText).toContain(
+      "  --audio URL,STT,TTS[,VOICE]\n                         transcribe voice messages and send voice replies with\n                         the OpenAI-compatible audio API at URL: speech-to-text\n                         model STT, text-to-speech model TTS, its voice VOICE\n",
+    )
     expect(helpText.endsWith("--reset-owners takes --owners without a list.\n")).toBe(true)
   })
 })
