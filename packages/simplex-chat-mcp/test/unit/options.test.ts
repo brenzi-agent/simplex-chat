@@ -156,6 +156,28 @@ describe("serve options", () => {
     expect(usage(["serve", "agent", "--approve", "host", "--inference", "http://127.0.0.1:8080"])).toBe("--inference: status messages are shown only in mode requests.")
   })
 
+  it("takes the abort file, resolved to an absolute path", () => {
+    expect(parseCommand(["serve", "agent", "--abort-file", "agent-abort/count"], home)).toMatchObject({options: {abortFile: join(process.cwd(), "agent-abort", "count")}})
+    expect(usage(["serve", "agent", "--abort-file"])).toBe("--abort-file: a value expected.")
+  })
+
+  it("refuses an abort file in a folder not disjoint from the data folder, and in mode host", () => {
+    for (const file of ["/home/alice/.simplex-mcp/agent/count", "/home/alice/.simplex-mcp/agent", "/home/alice/.simplex-mcp/count"]) {
+      expect(usage(["serve", "agent", "--abort-file", file])).toBe(`--abort-file: a file in a folder disjoint from the data folder expected, got ${file}`)
+    }
+    expect(usage(["serve", "agent", "--abort-file", "/tmp/a/abort/count", "--data", "/tmp/a"])).toBe("--abort-file: a file in a folder disjoint from the data folder expected, got /tmp/a/abort/count")
+    expect(parseCommand(["serve", "agent", "--data", "/tmp/a", "--abort-file", "/tmp/ab/count"], home)).toMatchObject({options: {abortFile: "/tmp/ab/count"}})
+    expect(usage(["serve", "agent", "--approve", "host", "--abort-file", "/tmp/ab/count"])).toBe("--abort-file: status messages are shown only in mode requests.")
+  })
+
+  it("refuses an abort file when it or its .part file is the model file or its .part file, and takes another file in the same folder", () => {
+    const models = ["--models", "gemma=llama-swap/gemma-4-26b"]
+    for (const [modelFile, abortFile] of [["/tmp/m/model", "/tmp/m/model"], ["/tmp/m/model", "/tmp/m/model.part"], ["/tmp/m/count.part", "/tmp/m/count"]]) {
+      expect(usage(["serve", "agent", ...models, "--model-file", modelFile, "--abort-file", abortFile])).toBe(`--abort-file: a file whose path and .part path differ from those of --model-file expected, got ${abortFile}`)
+    }
+    expect(parseCommand(["serve", "agent", ...models, "--model-file", "/tmp/m/model", "--abort-file", "/tmp/m/count"], home)).toMatchObject({options: {model: {file: "/tmp/m/model"}, abortFile: "/tmp/m/count"}})
+  })
+
   it("takes --owners with and without a list", () => {
     expect(parseCommand(["serve", "agent", "--owners", "--port", "5300"], home)).toMatchObject({options: {owners: [], port: 5300}})
     expect(parseCommand(["serve", "agent", "--owners", "3:Alice Smith,7:Bob"], home)).toMatchObject({
@@ -268,6 +290,7 @@ describe("help", () => {
       "  --audio URL,STT,TTS[,VOICE]\n                         transcribe voice messages and send voice replies with\n                         the OpenAI-compatible audio API at URL: speech-to-text\n                         model STT, text-to-speech model TTS, its voice VOICE\n",
     )
     expect(helpText).toContain("  --secrets-folder DIR   folder of the secrets that owners set with /secret,\n                         one file per name; disjoint from the data folder\n")
+    expect(helpText).toContain("  --abort-file FILE      show /abort in status messages and count it in FILE\n                         for the script that runs the agent; FILE in a folder\n                         disjoint from the data folder; mode requests only\n")
     expect(helpText.endsWith("--reset-owners takes --owners without a list.\n")).toBe(true)
   })
 })

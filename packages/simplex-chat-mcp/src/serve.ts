@@ -8,7 +8,7 @@ import {Action, Actions, Mode} from "./actions"
 import {Activity} from "./activity"
 import {AudioOptions} from "./audio"
 import {Control, controlDataOf, createControlChat, findControlGroup, hasOutcomeCard, isControlEvent, resetControlChat} from "./control"
-import {ModelOptions, ModelSelection, Secrets, acquireLock, createDataFolder, modelAtStart, releaseLock, serverToken, writeHeadersFile, writeServerFile} from "./files"
+import {ModelOptions, ModelSelection, Secrets, abortCounter, acquireLock, createDataFolder, modelAtStart, releaseLock, serverToken, writeHeadersFile, writeServerFile} from "./files"
 import {startHttp, stopHttp} from "./http"
 import {inferencePoller} from "./inference"
 import {ExitError, log, logError, shellPath} from "./log"
@@ -43,6 +43,7 @@ export interface ServeOptions {
   model?: ModelOptions
   audio?: AudioOptions
   secrets?: string
+  abortFile?: string
 }
 
 export interface RunningServer {
@@ -80,6 +81,7 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
     const token = serverToken(data, options.newToken)
     writeHeadersFile(data, token)
     const model = options.model === undefined ? undefined : modelAtStart(options.model)
+    const abort = options.abortFile === undefined ? undefined : abortCounter(options.abortFile)
     const chat = await api.ChatApi.init({type: "sqlite", filePrefix: join(data, "simplex")})
     log(`SimpleX MCP server ${fullVersion}, agent "${name}"`)
     log(`Data folder: ${data}`)
@@ -88,7 +90,7 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
     if (model !== undefined) log(`Model: ${model.selected.name} (${model.selected.model}), in ${model.file}`)
     if (audio !== undefined) log(`Audio: ${audio.url}, speech-to-text ${audio.stt}, text-to-speech ${audio.tts}${audio.voice === undefined ? "" : `, voice ${audio.voice}`}`)
     try {
-      return await startAgent(chat, options, token, inference, model)
+      return await startAgent(chat, options, token, inference, model, abort)
     } catch (error) {
       await chat.close().catch(() => undefined)
       throw error
@@ -99,7 +101,7 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
   }
 }
 
-async function startAgent(chat: api.ChatApi, options: ServeOptions, token: string, inference: ReturnType<typeof inferencePoller> | undefined, model: ModelSelection | undefined): Promise<RunningServer> {
+async function startAgent(chat: api.ChatApi, options: ServeOptions, token: string, inference: ReturnType<typeof inferencePoller> | undefined, model: ModelSelection | undefined, abort: ReturnType<typeof abortCounter> | undefined): Promise<RunningServer> {
   const {name, data, port, approve, expireHours} = options
   const secrets = options.secrets === undefined ? undefined : new Secrets(options.secrets, join(data, "secrets.json"))
   const created = (await chat.apiGetActiveUser()) ?? (await chat.apiCreateActiveUser({displayName: options.displayName ?? name, fullName: "", peerType: T.ChatPeerType.Agent}))
@@ -122,7 +124,7 @@ async function startAgent(chat: api.ChatApi, options: ServeOptions, token: strin
   const watch = new ChatItemsWatch()
   const activity = new Activity(name)
   const schedules = new Schedules(memberId => control.hasApprover(memberId))
-  const tools = new AgentTools({chat, user, actions, watch, controlChat: () => control.chatRef, standingApprover: (chatInfo, standing) => control.standingApprover(chatInfo, standing), refusedFile: (path, chatInfo, chat) => control.refusedFile(path, chatInfo, chat), data, inference, activity, schedules, audio: options.audio, secrets}, approve)
+  const tools = new AgentTools({chat, user, actions, watch, controlChat: () => control.chatRef, standingApprover: (chatInfo, standing) => control.standingApprover(chatInfo, standing), refusedFile: (path, chatInfo, chat) => control.refusedFile(path, chatInfo, chat), data, inference, activity, schedules, audio: options.audio, secrets, abort}, approve)
   const control: Control = new Control(chat, group, {displayName, owners: options.owners, registerHint: registerHint(options), qrCode: options.qrCode, model, secrets}, actions, tools, schedules)
   await control.load()
   await tools.deleteLeftoverStatuses().catch(error => logError("status messages", error))
@@ -153,8 +155,7 @@ async function startAgent(chat: api.ChatApi, options: ServeOptions, token: strin
         for (const ci of event.chatItems) {
           if (ci.chatInfo.type === "group" && ci.chatInfo.groupInfo.groupId === control.groupId) control.onMessage(ci)
         }
-        tools.onNewItems(event.chatItems)
-        watch.deliver(event.chatItems)
+        watch.deliver(tools.onNewItems(event.chatItems))
         return
       case "chatItemUpdated":
         tools.onFile(event.chatItem)

@@ -75,9 +75,7 @@ export function modelAtStart({models, file}: ModelOptions): ModelSelection {
 }
 
 export function writeModelFile(file: string, model: string): void {
-  writeFileSync(`${file}.part`, `${model}\n`, {mode: 0o644})
-  if (process.platform !== "win32") chmodSync(`${file}.part`, 0o644)
-  renameSync(`${file}.part`, file)
+  writeReadableFile(file, `${model}\n`)
 }
 
 export class Secrets {
@@ -109,9 +107,23 @@ export class Secrets {
   }
 }
 
+export function abortCounter(file: string): () => void {
+  const line = existsSync(file) ? readFileSync(file, "utf8").split("\n")[0] : ""
+  let count = 0
+  if (/^\d{1,15}$/.test(line)) count = Number(line)
+  else writeReadableFile(file, "0\n")
+  return () => writeReadableFile(file, `${++count}\n`)
+}
+
 function writePrivateFile(file: string, text: string): void {
   writeFileSync(file, text, {mode: 0o600})
   if (process.platform !== "win32") chmodSync(file, 0o600)
+}
+
+function writeReadableFile(file: string, text: string): void {
+  writeFileSync(`${file}.part`, text, {mode: 0o644})
+  if (process.platform !== "win32") chmodSync(`${file}.part`, 0o644)
+  renameSync(`${file}.part`, file)
 }
 
 function lockedError(dir: string, file: string, pid: number | undefined): ExitError {

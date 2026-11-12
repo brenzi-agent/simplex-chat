@@ -135,6 +135,7 @@ export interface Agent {
   schedules?: Schedules
   audio?: AudioOptions
   secrets?: Secrets
+  abort?: () => void
 }
 
 type JoinMethod =
@@ -533,6 +534,7 @@ export class AgentTools {
   private describedFiles = 0
   private readonly leaving = new Set<string>()
   private readonly typingChats = new Set<string>()
+  private readonly abortItems = new Set<number>()
   readonly statuses: Statuses
 
   constructor(private readonly agent: Agent, private readonly mode: Mode) {
@@ -605,7 +607,7 @@ export class AgentTools {
     return download.promise
   }
 
-  onNewItems(items: T.AChatItem[]): void {
+  onNewItems(items: T.AChatItem[]): T.AChatItem[] {
     for (const {chatInfo, chatItem} of items) {
       const chat = anyScopeChatRef(chatInfo)
       const {content, file, meta} = chatItem
@@ -615,7 +617,23 @@ export class AgentTools {
         else if (this.transcribesAtArrival(chatInfo, file, request.file)) this.transcribing.set(file.fileId, this.transcribeOnArrival(chatInfo, request))
       }
       const ref = chatRef(chatInfo)
-      if (ref !== undefined && this.typingChats.has(ref) && content.type === "rcvMsgContent" && !isLive(chatItem)) this.statuses.queue(ref)
+      if (ref === undefined || content.type !== "rcvMsgContent" || isLive(chatItem)) continue
+      if (this.statuses.offersAbort(ref) && isAbortMessage(chatItem)) this.abortAgent(ref, chatInfo, chatItem)
+      else if (this.typingChats.has(ref)) this.statuses.queue(ref)
+    }
+    return items.filter(({chatItem}) => !this.abortItems.has(chatItem.meta.itemId))
+  }
+
+  private abortAgent(chat: string, chatInfo: T.ChatInfo, chatItem: T.ChatItem): void {
+    this.abortItems.add(chatItem.meta.itemId)
+    markRead(this.agent.chat, chat, [chatItem.meta.itemId]).catch(error => logError(`abort in ${chat}`, error))
+    const {from} = toMessage(chatInfo, chatItem, {name: ""}, this.rejectedFiles, this.agent.data)
+    log(`Abort by ${oneLine(from)} in ${subjectText({...chatSubject(chatInfo), simplexName: undefined}, oneLine)} (${chat}).`)
+    try {
+      this.agent.abort!()
+      this.statuses.abort()
+    } catch (error) {
+      logError(`abort in ${chat}`, error)
     }
   }
 
@@ -1265,7 +1283,7 @@ export class AgentTools {
         throw chatErrorOf(error)?.type === "errorStore" ? unknownChat(chat) : error
       })
       const {chatInfo, items, unreadRest} = await unreadItems(this.agent.chat, chat, initial, limit + 1, chatItem => this.isFinal(chatItem))
-      const unread = items.filter(({content}) => content.type === "rcvMsgContent").map(chatItem => arrived.items.find(copy => copy.chatItem.meta.itemId === chatItem.meta.itemId) ?? {chatInfo, chatItem})
+      const unread = items.filter(({content, meta}) => content.type === "rcvMsgContent" && !this.abortItems.has(meta.itemId)).map(chatItem => arrived.items.find(copy => copy.chatItem.meta.itemId === chatItem.meta.itemId) ?? {chatInfo, chatItem})
       const skipped = items.filter(({content}) => content.type !== "rcvMsgContent").map(({meta}) => meta.itemId)
       const later = arrived.items.filter(a => !unread.some(u => u.chatItem.meta.itemId === a.chatItem.meta.itemId))
       arrived.items.splice(0, arrived.items.length, ...unread, ...later)
@@ -1299,7 +1317,7 @@ export class AgentTools {
 
   private async historyMessages(chat: string, chatInfo: T.ChatInfo, before: number | undefined, count: number): Promise<Message[]> {
     const self = this.selfSender(chatInfo, await this.chatFields(chatInfo))
-    const items = await historyItems(this.agent.chat, chat, before, count)
+    const items = await historyItems(this.agent.chat, chat, before, count, item => this.abortItems.has(item.meta.itemId) || (this.agent.abort !== undefined && isAbortMessage(item)))
     return items.map(chatItem => toMessage(chatInfo, chatItem, self, this.rejectedFiles, this.agent.data))
   }
 
@@ -1605,6 +1623,10 @@ function sentContent(file: Pick<Attachment, "type" | "preview" | "duration"> | u
 
 function isTranscribed({type, duration = 0, size}: FileOffer): boolean {
   return type === "voice" && duration <= maxVoiceSeconds && size <= maxVoiceBytes
+}
+
+function isAbortMessage({content}: T.ChatItem): boolean {
+  return content.type === "rcvMsgContent" && content.msgContent.type === "text" && content.msgContent.text.trim() === "/abort"
 }
 
 export function fitsMessage(content: T.MsgContent, fileName: string | undefined, quoted: Pick<Quoted, "content" | "fileName"> | undefined, mentions: {name: string}[] = []): boolean {

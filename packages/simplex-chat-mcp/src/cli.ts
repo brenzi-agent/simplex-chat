@@ -47,6 +47,9 @@ serve options:
                          model STT, text-to-speech model TTS, its voice VOICE
   --secrets-folder DIR   folder of the secrets that owners set with /secret,
                          one file per name; disjoint from the data folder
+  --abort-file FILE      show /abort in status messages and count it in FILE
+                         for the script that runs the agent; FILE in a folder
+                         disjoint from the data folder; mode requests only
 
 register options:
   --scope SCOPE          user (default) or local
@@ -132,6 +135,9 @@ function serveOptions(name: string, options: OptionReader, home: string): ServeO
       case "--secrets-folder":
         serve.secrets = resolve(options.value(option))
         break
+      case "--abort-file":
+        serve.abortFile = resolve(options.value(option))
+        break
       default:
         throw unknownOption(option)
     }
@@ -147,6 +153,9 @@ function serveOptions(name: string, options: OptionReader, home: string): ServeO
   const within = (folder: string, path: string): boolean => join(path, sep).startsWith(join(folder, sep))
   if (modelFile !== undefined && (within(serve.data, modelFile) || within(dirname(modelFile), serve.data))) throw usageError(`--model-file: a file in a folder disjoint from the data folder expected, got ${modelFile}`)
   if (serve.secrets !== undefined && (within(serve.data, serve.secrets) || within(serve.secrets, serve.data))) throw usageError(`--secrets-folder: a folder disjoint from the data folder expected, got ${serve.secrets}`)
+  if (serve.abortFile !== undefined && serve.approve === "host") throw usageError("--abort-file: status messages are shown only in mode requests.")
+  if (serve.abortFile !== undefined && (within(serve.data, serve.abortFile) || within(dirname(serve.abortFile), serve.data))) throw usageError(`--abort-file: a file in a folder disjoint from the data folder expected, got ${serve.abortFile}`)
+  if (serve.abortFile !== undefined && modelFile !== undefined && [serve.abortFile, `${serve.abortFile}.part`].some(path => path === modelFile || path === `${modelFile}.part`)) throw usageError(`--abort-file: a file whose path and .part path differ from those of --model-file expected, got ${serve.abortFile}`)
   return serve
 }
 
