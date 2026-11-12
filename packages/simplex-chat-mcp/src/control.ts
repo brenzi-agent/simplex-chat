@@ -100,7 +100,7 @@ An owner who approves actions adds a schedule, and its prompts become due only w
 Example: \`/schedule #3 0 7 * * 1-5 Post the trail report.\`, at 07:00 on weekdays.`
 const modelHelp = `/model shows the agent's model and a command for each other model.
 /'model NAME' selects NAME, one of the names given with --models; the script that runs the agent restarts it with that model.
-A server without --models refuses both. Example: \`/model glm\`.`
+A server without --models refuses both. Example: \`/model coder\`.`
 const helpHelp = `/help lists the commands. /'help COMMAND' shows how to use COMMAND, written with or without its \`/\`, such as /'help schedule'.
 Every member who can post in this chat may use /help; the other commands are for the owners who approve actions.`
 const helpTexts = new Map<string, string>([

@@ -39,7 +39,7 @@ describe("serve options", () => {
 
   it("reads every option", () => {
     const {options} = parseCommand(
-      ["serve", "agent-2", "--data", "/tmp/a", "--display-name", "Agent Two", "--approve", "host", "--expire", "1", "--stop-wait", "0", "--port", "5227", "--qr-code", "large", "--audio", "http://127.0.0.1:8080,stt,tts,ana", "--new-token", "--reset-owners", "--owners", "--models", "gemma=kodiak/gemma-4-26b", "--model-file", "/tmp/model/model"],
+      ["serve", "agent-2", "--data", "/tmp/a", "--display-name", "Agent Two", "--approve", "host", "--expire", "1", "--stop-wait", "0", "--port", "5227", "--qr-code", "large", "--audio", "http://127.0.0.1:8080,stt,tts,ana", "--new-token", "--reset-owners", "--owners", "--models", "gemma=llama-swap/gemma-4-26b", "--model-file", "/tmp/model/model"],
       home,
     ) as {options: object}
     expect(options).toEqual({
