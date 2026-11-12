@@ -308,6 +308,7 @@ My Agent: I sent a message to business Ridgeline, where I am incognito:
 After `/receive #3 7 all`, the agent's later downloads from #3 are performed at once, and nothing is posted in the agent control chat.
 
 - It covers files on the agent's XFTP servers. A download of a file on other servers gets a card, as without it.
+- With `--audio`, the server also downloads and transcribes the voice messages of #3 at their arrival ([Voice messages](#voice-messages)).
 - Cards already pending in #3, other than card 7, stay pending. A file you rejected, or whose card expired, gets a card again.
 - It covers downloads only, and the approval of messages covers no downloads: each is given and ended by its own command.
 - It lasts as the approval of messages does, until `/receive #3 off`, and is kept next to it in the chat's custom data.
@@ -391,7 +392,7 @@ Six tools:
 
 A `send` to a chat that `list` shows with `connected: false` is refused before any card. A `send` is refused with `text: too long for its approval card; shorten it.` when its card, in its longest outcome form, would exceed 15000 bytes in the SimpleX message, which holds at most 15602; a text of many lines or multi-byte characters reaches it below 12000 characters.
 
-A received message with a file has a `file` field: its name, size, type (image, video, voice or file) and status. Status `offered` means `download` can fetch it; `received` comes with the path of the file that `download` downloaded; a file `/forward` sent to you stays `offered`; `rejected` means you rejected its download, or it expired; `failed` comes with the error, also for a file above the size its sender may send, and for a received file that is not in the chat's folder, for example after `/delete #3 files`. A downloaded file is named by its file ID and the extension of its name, when the extension has only letters and digits: the name the sender gave stays in the `name` field. `download` first waits, up to `wait` seconds, for the sender to finish the upload; when it has not finished by then, the call returns an error that asks to call again later. A `download` that runs past its `wait` after the approval returns status `performing`, and the same call again picks it up. A download fails when the sender cancels the file, when the message or its chat is deleted, or when no part of the file arrives for 30 minutes; the server then cancels it.
+A received message with a file has a `file` field: its name, size, type (image, video, voice or file) and status; with `--audio`, the transcript of a received voice file is in it too ([Voice messages](#voice-messages)). Status `offered` means `download` can fetch it; `received` comes with the path of the file that `download` downloaded; a file `/forward` sent to you stays `offered`; `rejected` means you rejected its download, or it expired; `failed` comes with the error, also for a file above the size its sender may send, and for a received file that is not in the chat's folder, for example after `/delete #3 files`. A downloaded file is named by its file ID and the extension of its name, when the extension has only letters and digits: the name the sender gave stays in the `name` field. `download` first waits, up to `wait` seconds, for the sender to finish the upload; when it has not finished by then, the call returns an error that asks to call again later. A `download` that runs past its `wait` after the approval returns status `performing`, and the same call again picks it up. A download fails when the sender cancels the file, when the message or its chat is deleted, or when no part of the file arrives for 30 minutes; the server then cancels it.
 
 A short voice message can arrive with its file already received. The server moves such a file into the chat's folder under the same naming when it is received in full, and its message shows it as `offered`; `download` returns its path there after the approval. A partial file of a download, or of a short voice message that arrives while the server runs, is deleted when its transfer fails or is cancelled.
 
@@ -645,9 +646,10 @@ register options:
   lock               PID of the running server
   tmp/               the SimpleX core's work folder for files in transfer
   files/group-3/     files downloaded from chat #3, and files received there without a download, each named by its file ID
-                     and the extension of its name, such as 12.pdf; files/contact-4/ for contact @4
-  files/sent/        resized copies of the images the agent sends, and copies of the files /forward sends you under their names;
-                     each is deleted when its upload completes or fails, and all at start
+                     and the extension of its name, such as 12.pdf; files/contact-4/ for contact @4; with --audio, the
+                     transcript of a voice file next to it, such as 13.m4a.transcript.json, readable only by the user
+  files/sent/        resized copies of the images the agent sends, voice replies with their speech in WAV, and copies of the
+                     files /forward sends you under their names; each is deleted when its upload completes or fails, and all at start
   forwarded/group-3/ files /forward downloaded from chat #3, until /receive moves them into files/group-3/; deleted when the agent
                      leaves the chat, and by /delete #3 files
 ```

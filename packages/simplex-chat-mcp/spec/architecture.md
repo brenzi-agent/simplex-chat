@@ -39,6 +39,7 @@ flowchart LR
     control["control.ts<br/>Control"]
     schedule["schedule.ts<br/>Schedules"]
     messages["messages.ts<br/>ChatItemsWatch"]
+    audio["audio.ts<br/>speech-to-text<br/>text-to-speech"]
     serve["serve.ts<br/>start, events, stop"]
     files["files.ts"]
     log["log.ts"]
@@ -59,6 +60,8 @@ flowchart LR
   tools --> actions
   actions <--> control
   tools --> messages
+  tools --> audio
+  audio -->|"HTTP<br/>/v1/audio/transcriptions<br/>/v1/audio/speech"| api["OpenAI-compatible<br/>audio API, --audio"]
   serve --> control
   serve --> tools
   serve --> messages
@@ -250,19 +253,19 @@ Hooks are bound in [`serve.ts:105-111`](../src/serve.ts#L105-L111): `refusal`, `
 
 | Symbol | Line | Contents |
 |---|---|---|
-| `Message`, `MessageFile`, `FileOffer` | [16-50](../src/messages.ts#L16-L50) | message item of tool results; its file; the file of a download |
-| `ToolCall` | [57](../src/messages.ts#L57) | abort signal and progress callback of one call |
-| `Collected` | [62](../src/messages.ts#L62) | collected items, change signal, IDs of the items over the first 100, time of the last change |
-| `Changes` | [69](../src/messages.ts#L69) | set of wake callbacks |
-| `ChatItemsWatch` | [86](../src/messages.ts#L86) | listeners per chat reference; received message items gathered by `collect` |
-| `chatRef`, `anyScopeChatRef`, `isChatRef` | [135-152](../src/messages.ts#L135-L152) | `@N` and `#N` references: of the main conversation, or also of a group's member chat |
-| `toMessage`, `messageFile`, `receivedFileError`, `receivedPath` | [174-213](../src/messages.ts#L174-L213) | chat item to `Message`; where a received file is: its download path or its forwarded path |
-| `filePaths`, `chatFolder` | [215-223](../src/messages.ts#L215-L223) | `DATA/files/group-N`, `DATA/files/contact-N` or the same under `DATA/forwarded`; the download path and the forwarded path of a received file |
-| `fileOffer`, `fileContent` | [225-250](../src/messages.ts#L225-L250) | file fields of an item; message content of a file |
-| `getChat`, `receivingFiles`, `markRead` | [267-283](../src/messages.ts#L267-L283) | `apiGetChat` and `apiChatItemsRead` by chat reference; the IDs of a chat's files in status `rcvAccepted`, `rcvTransfer` or `rcvWarning`, paged |
-| `unreadItems` | [285](../src/messages.ts#L285) | unread items of a chat after its `initial` read, paged |
-| `reportProgress`, `nextChange`, `awaitResponses` | [301-331](../src/messages.ts#L301-L331) | waits |
-| `validName`, `viewName` | [337-363](../src/messages.ts#L337-L363) | display name rules and `@name` form |
+| `Message`, `MessageFile`, `FileOffer` | [17-51](../src/messages.ts#L17-L51) | message item of tool results; its file; the file of a download |
+| `ToolCall` | [58](../src/messages.ts#L58) | abort signal and progress callback of one call |
+| `Collected` | [63](../src/messages.ts#L63) | collected items, change signal, IDs of the items over the first 100, time of the last change |
+| `Changes` | [70](../src/messages.ts#L70) | set of wake callbacks |
+| `ChatItemsWatch` | [87](../src/messages.ts#L87) | listeners per chat reference; received message items gathered by `collect` |
+| `chatRef`, `anyScopeChatRef`, `isChatRef` | [136-153](../src/messages.ts#L136-L153) | `@N` and `#N` references: of the main conversation, or also of a group's member chat |
+| `toMessage`, `messageFile`, `receivedFileError`, `receivedPath` | [175-214](../src/messages.ts#L175-L214) | chat item to `Message`; where a received file is: its download path or its forwarded path |
+| `filePaths`, `chatFolder` | [216-224](../src/messages.ts#L216-L224) | `DATA/files/group-N`, `DATA/files/contact-N` or the same under `DATA/forwarded`; the download path and the forwarded path of a received file |
+| `fileOffer`, `fileContent` | [226-251](../src/messages.ts#L226-L251) | file fields of an item; message content of a file |
+| `getChat`, `receivingFiles`, `markRead` | [268-284](../src/messages.ts#L268-L284) | `apiGetChat` and `apiChatItemsRead` by chat reference; the IDs of a chat's files in status `rcvAccepted`, `rcvTransfer` or `rcvWarning`, paged |
+| `unreadItems` | [286](../src/messages.ts#L286) | unread items of a chat after its `initial` read, paged until a count of final messages |
+| `reportProgress`, `nextChange`, `awaitResponses` | [299-329](../src/messages.ts#L299-L329) | waits; the wait of `awaitResponses` ended at idle only when every collected item is final |
+| `validName`, `viewName` | [335-361](../src/messages.ts#L335-L361) | display name rules and `@name` form |
 
 ### [2.8 `files.ts`](../src/files.ts)
 
@@ -587,7 +590,7 @@ Sources: [actions.ts:166](../src/actions.ts#L166), [tools.ts:511](../src/tools.t
 | human owner | human with role `owner` | [control.ts:471-473](../src/control.ts#L471-L473) |
 | approver, `--owners` absent | member with role `owner` | [control.ts:488-492](../src/control.ts#L488-L492) |
 | approver, `--owners` without a list | none | [control.ts:491](../src/control.ts#L491) |
-| approver, `--owners ID:NAME,...` | member with role `owner` whose `groupMemberId` and `displayName`, folded to one line by `oneLine`, match an entry | [control.ts:491](../src/control.ts#L491), [:758-760](../src/control.ts#L758-L760) |
+| approver, `--owners ID:NAME,...` | member with role `owner` whose `groupMemberId` and `displayName`, folded to one line by `oneLine`, match an entry | [control.ts:491](../src/control.ts#L491), [:759-761](../src/control.ts#L759-L761) |
 
 The command sender's member record from the chat item is checked ([control.ts:177](../src/control.ts#L177), [:205](../src/control.ts#L205)). The approver count for refusals and standing approvals is taken from `Control.members`, refreshed at load and at each membership event ([control.ts:188](../src/control.ts#L188), [:477-479](../src/control.ts#L477-L479)).
 
@@ -768,7 +771,7 @@ Node limits: `requestTimeout` 0, `timeout` 0, `headersTimeout` 60 s, `keepAliveT
 | link texts on a connect card | code span lines in the bytes that the largest card form leaves; the line that does not fit is cut and ends in `…` inside its code span; later lines left out | [control.ts:644-658](../src/control.ts#L644-L658) |
 | mention names | valid name: `@name` or `@'name'`; others a code span | [`mentionText`](../src/control.ts#L692-L695) |
 | errors on cards | folded to one line, one code span | [control.ts:565](../src/control.ts#L565) |
-| `--owners` part of restart lines in the chat | one code span | [control.ts:79](../src/control.ts#L79), [:782-784](../src/control.ts#L782-L784) |
+| `--owners` part of restart lines in the chat | one code span | [control.ts:79](../src/control.ts#L79), [:783-785](../src/control.ts#L783-L785) |
 | terminal names and errors of actions | folded to one line | [actions.ts:180-181](../src/actions.ts#L180-L181), [:333-341](../src/actions.ts#L333-L341), [control.ts:78](../src/control.ts#L78) |
 | tool results | returned as data; schema descriptions and instructions mark `text`, `from`, `name`, file names, downloaded files, `description`, `welcome` and `commands` with their labels and params as data, not instructions; the instructions take a chat's messages as prompts only when the user said so in the session, and limit what the agent shares about its user | [tools.ts:192](../src/tools.ts#L192), [:196](../src/tools.ts#L196), [:201](../src/tools.ts#L201), [:226-227](../src/tools.ts#L226-L227), [:237-242](../src/tools.ts#L237-L242), [:407](../src/tools.ts#L407), [:451](../src/tools.ts#L451) |
 
@@ -876,7 +879,7 @@ The server writes the tappable form `/'...'` only in the card's command line ([c
 | `ffmpeg`, `ffprobe` | 30 s, 64 MiB of output | [tools.ts:159](../src/tools.ts#L159), [:164](../src/tools.ts#L164) |
 | stop wait | 0 to 60 s, default 10 | [cli.ts:68](../src/cli.ts#L68), [:89-91](../src/cli.ts#L89-L91) |
 | error details | 500 characters | [log.ts:4](../src/log.ts#L4) |
-| progress interval | 60 s | [messages.ts:7](../src/messages.ts#L7) |
+| progress interval | 60 s | [messages.ts:8](../src/messages.ts#L8) |
 | expiry tick | 60 s | [actions.ts:10](../src/actions.ts#L10) |
 | HTTP body | 4 MiB | [server index.cjs:254](../node_modules/@modelcontextprotocol/server/dist/index.cjs#L254) |
 | SSE keep-alive | 15 s | [mcp-BumlNux0.cjs:64](../node_modules/@modelcontextprotocol/server/dist/mcp-BumlNux0.cjs#L64) |

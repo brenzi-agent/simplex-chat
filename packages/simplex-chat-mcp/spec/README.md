@@ -84,6 +84,8 @@ graph TD
   files --> log
   http --> log
   messages --> log
+  messages --> audio
+  audio --> log
   serve --> sc["simplex-chat"]
   tools --> sc
   control --> sc

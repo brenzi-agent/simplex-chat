@@ -61,7 +61,7 @@ Action fields of the key:
 | Tool | Fields |
 |---|---|
 | `connect` | `target`<br>`incognito` (default `false`)<br>`message` (default `null`) |
-| `send` | `chat`<br>`text` (default `null`)<br>`file` (default `null`)<br>`as` (default `null`)<br>`reply_to` (default `null`)<br>`mention` (default `null`) |
+| `send` | `chat`<br>`text` (default `null`)<br>`file` (default `null`)<br>`as` (default `null`)<br>`reply_to` (default `null`)<br>`mention` (default `null`)<br>`voice` (default `null`) |
 | `download` | `chat`<br>`item` |
 | `leave` | `chat` |
 
@@ -140,11 +140,12 @@ Input:
 | Field | Type | Range | Default | Rule |
 |---|---|---|---|---|
 | `chat` | string | | required | `@N` or `#N` of the agent |
-| `text` | string | 1 to 12000 characters | required without `file` | the message text, or the caption of `file` |
+| `text` | string | 1 to 12000 characters | required without `file` and `voice` | the message text, or the caption of `file` or `voice` |
 | `file` | string | 1 character or more | | absolute path of a file of this computer |
 | `as` | string | `file` | | sends an image or video unchanged, as a file; only with `file` |
 | `reply_to` | integer | 1 or more | | item ID of a message in `chat` |
 | `mention` | integer array | 1 to 3, unique, each 1 or more | | member IDs of a group; names missing from `text` are prefixed as `@name` |
+| `voice` | string | 1 to 4096 characters | | with `--audio` only: the text spoken by the audio API and sent as a voice message; not with `file` ([1.10](#110-voice-messages)) |
 | `wait` | number | 0 to 86400 | 60 | seconds from the send; from the call when it attaches to a done action |
 | `idle` | number | 1 to 300 | 30 | seconds without a new response, once one arrived |
 | `limit` | integer | 1 to 100 | 50 | most responses returned |
@@ -169,8 +170,8 @@ Output:
 | `status` | always | `done`, `failed`, `rejected`, `expired`; `live` with `live: true` |
 | `chat` | `done`, `live` | the chat reference |
 | `item` | `done` | item ID of the sent message |
-| `responses` | `done` | received message items with IDs above `item`, in arrival order, live items left out, at most `limit` |
-| `more` | `done` | collected responses not returned, live ones and overflow included |
+| `responses` | `done` | received message items with IDs above `item`, in arrival order, live and held items left out ([1.10](#110-voice-messages)), at most `limit` |
+| `more` | `done` | collected responses not returned, live and held ones and overflow included |
 | `error` | `failed` | error text |
 
 Only `status` is required by the output schema ([tools.ts:338](../src/tools.ts#L338)).
@@ -226,7 +227,7 @@ Output (`chat`, `messages` and `more` always present):
 | Field | Value |
 |---|---|
 | `chat` | the chat reference |
-| `messages` | unread received messages in chat order, then received messages that arrived during the call; live items left out; at most `limit` |
+| `messages` | unread received messages in chat order, then received messages that arrived during the call; live and held items left out ([1.10](#110-voice-messages)); at most `limit` |
 | `more` | new messages not returned, overflow, and unread items left unread by the page reads |
 | `scheduled` | the due scheduled prompts of the chat, each `{prompt, at}`, `at` the minute it became due as `YYYY-MM-DD HH:MM UTC`; present only when one is due |
 
@@ -256,6 +257,7 @@ Output:
 | `status` | always | `done`, `performing`, `failed`, `rejected`, `expired` |
 | `chat`, `item` | `done` | the message |
 | `path` | `done` | `DATA/files/FOLDER/<file ID><extension>` |
+| `transcript`, `transcript_error` | `done` | the fields of the file's transcript file, when present ([1.10](#110-voice-messages)) |
 | `error` | `failed` | error text |
 
 FOLDER is `group-N` for `#N` and `contact-N` for `@N`; the extension is the file name's extension when it has 1 to 16 ASCII letters and digits ([messages.ts:215-223](../src/messages.ts#L215-L223)). `/forward` downloads a file to `DATA/forwarded/FOLDER/` under the same name; a later perform of the download moves it to the download path, after the copy for the post is made ([tools.ts:542-559](../src/tools.ts#L542-L559)).
@@ -355,7 +357,7 @@ Message ([`Message`](../src/messages.ts#L16-L28), [`toMessage`](../src/messages.
 | `reply_to` | object | quoted item with an ID | `{chat, item: quotedItem.itemId}` |
 | `mentions_me` | boolean | always | `meta.userMention` |
 
-File ([`messageFile`](../src/messages.ts#L194-L208)):
+File ([`messageFile`](../src/messages.ts#L195-L209)):
 
 | Field | Value |
 |---|---|
@@ -365,6 +367,8 @@ File ([`messageFile`](../src/messages.ts#L194-L208)):
 | `status` | first match:<br>`rejected`: the file ID is in rejected files<br>`failed`: `fileProhibited` is set, the status is `rcvCancelled`, `rcvAborted`, `rcvError` or `invalid`, or the status is `rcvComplete` and neither the download path nor the forwarded path has a file<br>`received`: `rcvComplete`, a file at the download path, and `fileSource` at the download path or the forwarded path<br>`offered`: otherwise, a file that `/forward` downloaded included |
 | `path` | `received`: the download path |
 | `error` | `failed`: the error text ([log.ts:197-244](../src/log.ts#L197-L244)) |
+| `transcript` | `received`: the string `transcript` of the transcript file ([1.10](#110-voice-messages)) |
+| `transcript_error` | `received`: the string `transcript_error` of the transcript file, without `transcript` |
 
 Only received message items (`rcvMsgContent`) are returned by `send` and `receive`; `connect` also returns sent ones (`sndMsgContent`) ([messages.ts:101](../src/messages.ts#L101), [tools.ts:684](../src/tools.ts#L684)).
 
@@ -552,7 +556,7 @@ The server reads commands from members' messages in the main conversation of the
 | `leave CHAT` | accepted, at once in both modes; the pending actions of CHAT with a card are rejected by the sender | `Left KIND NAME (CHAT), requested by NAME.`, or `Deleted ...` for a contact; logged too | [control.ts:283-297](../src/control.ts#L283-L297) |
 | `delete CHAT files` | the chat's downloads in memory fail and are cancelled; its other files in status `rcvAccepted`, `rcvTransfer` or `rcvWarning`, such as downloads the core continues after a restart, are cancelled; the folder of CHAT and its forwarded folder are deleted, for a current or a left chat | `Deleted K files from CHAT, SIZE.` (`1 file`), or `No files from CHAT.` | [control.ts:304-307](../src/control.ts#L304-L307), [tools.ts:956-974](../src/tools.ts#L956-L974), [messages.ts:271-279](../src/messages.ts#L271-L279) |
 | `pending` | no pending action with a card | `No pending actions.` | [control.ts:208](../src/control.ts#L208) |
-| `pending` | otherwise | one line per action: `N  WHAT  expires YYYY-MM-DD HH:MM UTC` | [control.ts:207](../src/control.ts#L207), [:618-620](../src/control.ts#L618-L620) |
+| `pending` | otherwise | one line per action: `N  WHAT  expires YYYY-MM-DD HH:MM UTC` | [control.ts:207](../src/control.ts#L207), [:619-621](../src/control.ts#L619-L621) |
 | `list` | no chats | `No chats.` | [control.ts:325](../src/control.ts#L325) |
 | `list` | otherwise | one line per chat of the 100 most recent: `CHAT  KIND NAME`, then `, approved for this chat by APPROVER`, `, files approved by APPROVER` and `, not connected` when applicable, cut to 100 bytes with `…`; then `K older chats are not shown.` (`1 older chat is not shown.`) | [control.ts:313-326](../src/control.ts#L313-L326) |
 
@@ -569,7 +573,7 @@ Request lines:
 | Tool | First line | Further lines |
 |---|---|---|
 | `connect` | `I want to connect to SUBJECT, as myself.` or `, incognito.`<br>done and connected: `I connected to ...`<br>done and not connected: `I asked to connect to ...` | link description, one code span per line<br>welcome, one code span per line<br>both cut to fit the card ([1.9](#19-action-refusals))<br>with `message`: `With the message:` and its lines |
-| `send` | `I want to send a message to SUBJECT:`, with `, where I am incognito` before the colon in incognito chats<br>done: `I sent a message to ...` | text, one code span per line<br>with `file`: ``attaching TYPE `PATH`, SIZE``<br>`replying to NAME: QUOTE` with `reply_to`, the quote cut to 100 characters<br>`mentioning @A, @'B C'` with `mention` |
+| `send` | `I want to send a message to SUBJECT:`, with `, where I am incognito` before the colon in incognito chats<br>done: `I sent a message to ...` | text, one code span per line<br>with `file`: ``attaching TYPE `PATH`, SIZE``<br>with `voice`: `attaching as a voice message:`, then the voice text, one code span per line<br>`replying to NAME: QUOTE` with `reply_to`, the quote cut to 100 characters<br>`mentioning @A, @'B C'` with `mention` |
 | `download` | `I want to download a file from SENDER in KIND NAME (CHAT):`, without `SENDER in ` outside groups<br>done: `I downloaded a file from ...` | ``` `NAME`, SIZE ```<br>an XFTP file: `Servers: known.`, or ``Servers: `HOST`, `HOST`, unknown: downloading shows them this computer's IP address.`` (`it` for one) |
 | `leave` | `I want to delete KIND NAME (@N).` or `I want to leave KIND NAME (#N).`<br>done: `I deleted ...` or `I left ...` | |
 
