@@ -60,7 +60,7 @@ sequenceDiagram
   P->>S: simplex-mcp serve my-agent --display-name "My Agent"
   S->>S: DATA mode 0700, lock, token, headers.json, hook-headers
   S->>C: ChatApi.init DATA/simplex
-  S->>P: version line, data folder, approval mode
+  S->>P: version line, data folder, approval mode, with --models the model line
   S->>C: apiGetActiveUser (none)
   S->>C: apiCreateActiveUser {displayName: "My Agent", fullName: "", peerType: agent}
   S->>C: apiSetNetworkConfig smpProxyMode always, smpProxyFallback allowProtected

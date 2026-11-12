@@ -836,6 +836,16 @@ The server writes the tappable form `/'...'` only in the card's command line ([c
 | `/slots` is skipped when `is_sleeping` of `/props` is true | [inference.ts:80](../src/inference.ts#L80) |
 | polls are made only for renders 2 to 49, at most one per 3 s for all status messages | [status.ts:136-140](../src/status.ts#L136-L140), [inference.ts:36](../src/inference.ts#L36) |
 
+### 6.8 Model file
+
+| Rule | Code |
+|---|---|
+| the folder of FILE is not the data folder, is not inside it and does not contain it; otherwise the CLI exits with code 2 | [cli.ts:124-125](../src/cli.ts#L124-L125) |
+| `--models` items are checked at start: NAME `^[a-z][a-z0-9-]{0,15}$`, PROVIDER/MODEL `^[A-Za-z0-9][\w.-]{0,31}/[\w.:/+@-]{1,64}$`, the provider without `/` | [cli.ts:199-205](../src/cli.ts#L199-L205) |
+| FILE contains only the PROVIDER/MODEL of an item of `--models` and a newline, with mode 0644 | [files.ts:61-72](../src/files.ts#L61-L72), [control.ts:324](../src/control.ts#L324) |
+| FILE is replaced whole: the server writes `FILE.part` in the same folder and renames it to FILE | [files.ts:68-72](../src/files.ts#L68-L72) |
+| at start, the model in the first line of FILE is selected only when it equals a PROVIDER/MODEL of `--models` | [files.ts:61-66](../src/files.ts#L61-L66) |
+
 ---
 
 ## 7. Limits

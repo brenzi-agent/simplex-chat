@@ -29,6 +29,7 @@ Status: v0.3. [`TESTING.md`](TESTING.md) describes a local build and test. The d
 - [Waiting for approval in Claude Code](#waiting-for-approval-in-claude-code)
 - [Several agents](#several-agents)
 - [Other MCP hosts](#other-mcp-hosts)
+- [The agent's model](#the-agents-model)
 - [Recovery](#recovery)
 - [Command reference](#command-reference)
 - [Data folder](#data-folder)
@@ -533,6 +534,49 @@ npx -y @simplex-chat/mcp register my-agent-2
 
 Add an entry with the URL `http://127.0.0.1:5226/mcp` and the header `Authorization: Bearer <token>`, as in `headers.json` of the data folder; after `--new-token`, update the entry. A host that ends a tool call early returns a timeout to the agent; the agent repeats the call with the same arguments, which picks up the same action. Hosts with a fixed tool-call limit, between 60 and 300 seconds in several hosts, need `wait` below it.
 
+## The agent's model
+
+With `--models` and `--model-file`, an owner selects the model of an agent that a script runs in opencode. The server only writes the selected model to the file; the script restarts the agent.
+
+```
+npx -y @simplex-chat/mcp serve kodiak --models gemma=kodiak/gemma-4-26b,glm=privatemode/glm-latest,flash=privatemode/glm-flash-latest --model-file /run/agent-model/model
+```
+
+- Each item of `--models` is `NAME=PROVIDER/MODEL`. Owners type NAME; opencode's `--model` takes PROVIDER/MODEL.
+- NAME: 1 to 16 lowercase letters, digits and hyphens, starting with a letter. PROVIDER: 1 to 32 letters, digits, `_`, `.` and `-`, starting with a letter or digit. MODEL: 1 to 64 letters, digits and `_.:/+@-`.
+- Names are unique, and so are PROVIDER/MODEL values. The first item is the default.
+- The start prints `Model: gemma (kodiak/gemma-4-26b), in /run/agent-model/model`.
+
+In the agent control chat:
+
+```
+/model        The agent's model is `gemma`: `kodiak/gemma-4-26b`.
+              /model glm
+              /model flash
+/model glm    The agent's model is `glm`: `privatemode/glm-latest`. The agent restarts with it. /model gemma
+/model gemma  The agent's model is already `gemma`.
+/model gpt    No such model. /model shows the models.
+```
+
+- Only approvers select a model, in both approval modes. The command at the end of a switch reply selects the previous model.
+- With `--models`, `/model` is in the chat's command menu. Without it, `/model` replies `This server runs without --models.`
+- A switch is logged: `Model set to glm (privatemode/glm-latest) by Alice.`
+
+The file of `--model-file`, FILE:
+
+- FILE contains the selected PROVIDER/MODEL and a newline, with mode 0644. The server writes `FILE.part` and renames it to FILE.
+- The server writes FILE at each switch, and at a start when FILE is missing or its first line is no PROVIDER/MODEL of `--models`. Otherwise FILE and its model are kept at a start.
+- FILE's folder must exist and be writable by the server. It must be outside the data folder and must not contain it.
+
+The script that runs opencode:
+
+- Mount FILE's folder read-only into the agent's container, not FILE itself: a bind mount of one file references the replaced file after a rename ([moby/moby#15793](https://github.com/moby/moby/issues/15793)).
+- Before each run, read the first line of FILE and pass it to `opencode run --model` as one argument.
+- While opencode runs, read FILE every few seconds. When its first line differs from the running model, stop opencode and start it with the new model in a new session, without `--continue`.
+- Define each PROVIDER/MODEL of `--models` in opencode's configuration.
+
+When opencode stops while a `receive` waits, the server aborts the call without marking messages read, and the agent receives them in the new session.
+
 ## Recovery
 
 | Situation | What to do |
@@ -629,6 +673,7 @@ One server runs per data folder: a second one exits, because two processes on on
 - Only approvers schedule prompts, and a schedule's prompts become due only while the owner who added it is an approver. `receive` returns them in `scheduled`, apart from the chat's messages.
 - The server refuses to send private keys, its own files and the files under `~/.simplex-mcp`, where agents keep their data, except the files under `files/` of its own data folder; other files the agent can read are sent after approval.
 - After `/receive #N 7 all`, the agent's later downloads from that chat, of files on its XFTP servers, run without asking; `/receive #N off` ends it. A file on other servers is downloaded only by `/receive` or `/forward` of the card that names them; any other download of it fails, unless the IP address is protected.
+- With `--models`, only approvers switch the agent's model, and only to an item of `--models`; an unknown name is left out of the reply. The file of `--model-file` contains only PROVIDER/MODEL, in a folder outside the data folder; mount that folder read-only in the agent's container.
 - Peers of a chat connected as the agent see its profile; peers of an incognito chat see a random profile made for that chat only.
 - The agent has no address, so nobody can contact it first.
 - The agent uses private message routing: the SMP server that holds a contact's queue does not see the agent's IP address.

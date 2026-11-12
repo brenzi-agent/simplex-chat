@@ -507,6 +507,7 @@ menu entry   keyword   label                 params      tapped
 /list        list      Chats and approvals   none        sent
 /schedules   schedules Scheduled prompts     none        sent
 /leave       leave     Leave a chat          <chat ID>   "/leave <chat ID>" in the entry field, the cursor at its end
+/model       model     The agent's model     none        sent; the entry only with --models
 ```
 
 - The apps put "/keyword params" into the entry field for a command with params, and send "/keyword" for one without (`CommandsMenuView.kt:154-159`, `CommandsMenuView.swift:118-124`).
@@ -1159,7 +1160,7 @@ serve(NAME, options):
   --reset-owners: membership current and role below owner: /_leave #group (parser Commands.hs:6424), as only an owner or a former member deletes a group (Commands.hs:1395-1398);
     /_delete #group full notify=on; group = createControlChat(nextAction)
   group.membership not owner, or memberStatus not creator, connected or complete: lost = true; log "The agent lost its control chat. Restart the server with --reset-owners."
-  lost unset, group.groupProfile.displayName differs from the profile's, or its commands from the menu of createControlChat: /_group_profile #group {the group profile with that displayName and menu}   # APIUpdateGroupProfile, parser Commands.hs:6534
+  lost unset, group.groupProfile.displayName differs from the profile's, or its commands from the menu of createControlChat with /model appended under --models: /_group_profile #group {the group profile with that displayName and menu}   # APIUpdateGroupProfile, parser Commands.hs:6534
   members = /_members #group, so approvers are known before the first call
   each chat of list() that meets the conditions of status messages: deleteLeftovers(chat), awaited (section Status message); a failed chat list: logged "status messages: <error>"
   HTTP listen 127.0.0.1:PORT; port in use: chat.close(); remove DIR/lock; exit 1 "Port PORT is in use. Start with --port N."   # before any link or QR code is printed

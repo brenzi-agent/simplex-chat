@@ -84,6 +84,8 @@ When its server starts, the agent posts `SimpleX MCP server 0.2.0 (8e4b6f1c2d) s
 - Messages in your prompt chat can become prompts for your Claude Code session: use a chat where only you and people you trust write.
 - The agent runs on your computer and has no address in SimpleX Network, so nobody can contact it first.
 
+You can switch the model of an agent that a script runs in opencode: start the server with `--models` and `--model-file`, then send `/model` in "My Agent" and tap one of the models you listed ([details](https://github.com/simplex-chat/simplex-chat/blob/master/packages/simplex-chat-mcp/REFERENCE.md#the-agents-model)).
+
 ## Only Claude Code, for now
 
 The agent is tested with Claude Code. Tell us which other apps and models you want to use in [an issue](https://github.com/simplex-chat/simplex-chat/issues), or contribute.
