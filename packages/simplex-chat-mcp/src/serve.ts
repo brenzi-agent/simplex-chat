@@ -8,7 +8,7 @@ import {Action, Actions, Mode} from "./actions"
 import {Activity} from "./activity"
 import {AudioOptions} from "./audio"
 import {Control, controlDataOf, createControlChat, findControlGroup, hasOutcomeCard, isControlEvent, resetControlChat} from "./control"
-import {ModelOptions, ModelSelection, acquireLock, createDataFolder, modelAtStart, releaseLock, serverToken, writeHeadersFile, writeServerFile} from "./files"
+import {ModelOptions, ModelSelection, Secrets, acquireLock, createDataFolder, modelAtStart, releaseLock, serverToken, writeHeadersFile, writeServerFile} from "./files"
 import {startHttp, stopHttp} from "./http"
 import {inferencePoller} from "./inference"
 import {ExitError, log, logError, shellPath} from "./log"
@@ -42,6 +42,7 @@ export interface ServeOptions {
   inference?: string
   model?: ModelOptions
   audio?: AudioOptions
+  secrets?: string
 }
 
 export interface RunningServer {
@@ -100,6 +101,7 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
 
 async function startAgent(chat: api.ChatApi, options: ServeOptions, token: string, inference: ReturnType<typeof inferencePoller> | undefined, model: ModelSelection | undefined): Promise<RunningServer> {
   const {name, data, port, approve, expireHours} = options
+  const secrets = options.secrets === undefined ? undefined : new Secrets(options.secrets, join(data, "secrets.json"))
   const created = (await chat.apiGetActiveUser()) ?? (await chat.apiCreateActiveUser({displayName: options.displayName ?? name, fullName: "", peerType: T.ChatPeerType.Agent}))
   const networkConfig = await chat.apiGetNetworkConfig()
   await chat.apiSetNetworkConfig({...networkConfig, smpProxyMode: T.SMPProxyMode.Always, smpProxyFallback: T.SMPProxyFallback.AllowProtected})
@@ -120,8 +122,8 @@ async function startAgent(chat: api.ChatApi, options: ServeOptions, token: strin
   const watch = new ChatItemsWatch()
   const activity = new Activity(name)
   const schedules = new Schedules(memberId => control.hasApprover(memberId))
-  const tools = new AgentTools({chat, user, actions, watch, controlChat: () => control.chatRef, standingApprover: (chatInfo, standing) => control.standingApprover(chatInfo, standing), refusedFile: (path, chatInfo, chat) => control.refusedFile(path, chatInfo, chat), data, inference, activity, schedules, audio: options.audio}, approve)
-  const control: Control = new Control(chat, group, {displayName, owners: options.owners, registerHint: registerHint(options), qrCode: options.qrCode, model}, actions, tools, schedules)
+  const tools = new AgentTools({chat, user, actions, watch, controlChat: () => control.chatRef, standingApprover: (chatInfo, standing) => control.standingApprover(chatInfo, standing), refusedFile: (path, chatInfo, chat) => control.refusedFile(path, chatInfo, chat), data, inference, activity, schedules, audio: options.audio, secrets}, approve)
+  const control: Control = new Control(chat, group, {displayName, owners: options.owners, registerHint: registerHint(options), qrCode: options.qrCode, model, secrets}, actions, tools, schedules)
   await control.load()
   await tools.deleteLeftoverStatuses().catch(error => logError("status messages", error))
   const factory = (): McpServer => {
@@ -149,7 +151,7 @@ async function startAgent(chat: api.ChatApi, options: ServeOptions, token: strin
     switch (event.type) {
       case "newChatItems":
         for (const ci of event.chatItems) {
-          if (ci.chatInfo.type === "group" && ci.chatInfo.groupInfo.groupId === control.groupId && ci.chatInfo.groupChatScope === undefined) control.onMessage(ci)
+          if (ci.chatInfo.type === "group" && ci.chatInfo.groupInfo.groupId === control.groupId) control.onMessage(ci)
         }
         tools.onNewItems(event.chatItems)
         watch.deliver(event.chatItems)

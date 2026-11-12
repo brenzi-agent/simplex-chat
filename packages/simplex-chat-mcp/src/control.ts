@@ -2,7 +2,7 @@ import {CEvt, ChatEvent, T} from "@simplex-chat/types"
 import * as qrcode from "qrcode"
 import {api, core} from "simplex-chat"
 import {Action, ActionHooks, Actions, ConnectAction, DownloadAction, Standing, Subject, ToolError, hasUnknownServers, leaveVerbs, subjectText, summary} from "./actions"
-import {ModelSelection, writeModelFile} from "./files"
+import {ModelSelection, Secrets, secretName, writeModelFile} from "./files"
 import {ExitError, chatErrorOf, errorText, fileError, log, logError, oneLine, serverHostname, shellWord} from "./log"
 import {chatNumber, chatRef, chatType, fileContent, isChatRef, utcMinutes, validName, viewName} from "./messages"
 import {ScheduleEntry, Schedules, cronError} from "./schedule"
@@ -14,12 +14,16 @@ const controlCommands: T.ChatBotCommand[] = [
   {type: "command", keyword: "list", label: "Chats and approvals"},
   {type: "command", keyword: "schedules", label: "Scheduled prompts"},
   {type: "command", keyword: "leave", label: "Leave a chat", params: "<chat ID>"},
+  {type: "command", keyword: "secrets", label: "Secrets"},
   {type: "command", keyword: "help", label: "Help"},
 ]
 const modelCommand: T.ChatBotCommand = {type: "command", keyword: "model", label: "The agent's model"}
 
-const commandsReply = "Commands: /approve, /reject, /receive, /forward, /revoke, /copies, /leave, /delete, /pending, /list, /schedule, /unschedule, /schedules, /model, /help. Each card shows its commands."
+const fullDelete: T.GroupPreference = {enable: T.GroupFeatureEnabled.On}
+const commandsReply = "Commands: /approve, /reject, /receive, /forward, /revoke, /copies, /leave, /delete, /pending, /list, /schedule, /unschedule, /schedules, /secret, /unsecret, /secrets, /model, /help. Each card shows its commands."
 const noHelp = "No help for that. /help lists the commands."
+const secretsOff = "Secrets are off: the server runs without --secrets-folder."
+const secretUsage = "Usage: /secret NAME VALUE on one line. NAME: capital letters, digits and _, starting with a letter, up to 64 characters. VALUE: 8 characters or more."
 const cardTooLong = {
   send: "text: too long for its approval card; shorten it.",
   connect: "message: too long for its approval card; shorten it.",
@@ -62,6 +66,9 @@ const commandsHelp = `/'approve N' or /'approve CHAT N' performs pending action 
 /'schedule CHAT CRON PROMPT' schedules a prompt for the agent in CHAT.
 /'unschedule CHAT N' removes schedule N of CHAT.
 /schedules lists the schedules of all chats.
+/'secret NAME VALUE' stores secret NAME for the agent; the message is deleted for everyone at once.
+/'unsecret NAME' deletes secret NAME.
+/secrets lists the secrets.
 /model shows the agent's model; /'model NAME' switches it.
 /'help COMMAND' shows how to use COMMAND, such as /'help schedule'.`
 const approveHelp = `/'approve N' performs pending action N: a connect, send or leave. /'reject N' rejects pending action N, a download too. Its card then shows the outcome.
@@ -98,6 +105,12 @@ The agent's \`receive\` of CHAT returns a due prompt once; until then, the later
 An owner who approves actions adds a schedule, and its prompts become due only while that owner approves actions.
 /'unschedule CHAT N' removes schedule N of CHAT and renumbers the later ones. /schedules lists up to ${listedSchedules} schedules of all chats.
 Example: \`/schedule #3 0 7 * * 1-5 Post the trail report.\`, at 07:00 on weekdays.`
+const secretHelp = `/'secret NAME VALUE' stores VALUE as secret NAME in the folder of --secrets-folder, in place of an earlier value.
+Every new message here that starts with the word /secret, in any letter case, is deleted for everyone at once, also an invalid one; the reply shows no value.
+NAME: capital letters, digits and _, starting with a letter, up to 64 characters. VALUE: the rest of the line, 8 characters or more.
+The agent's \`list\` returns the folder and the names of the secrets, not their values, and its \`send\` refuses their files.
+/'unsecret NAME' deletes secret NAME. /secrets lists the secrets, with the owner who set each one here and the time.
+A server without --secrets-folder refuses the three commands. Example: \`/secret API_TOKEN 4f9c2e7a1b\`.`
 const modelHelp = `/model shows the agent's model and a command for each other model.
 /'model NAME' selects NAME, one of the names given with --models; the script that runs the agent restarts it with that model.
 A server without --models refuses both. Example: \`/model coder\`.`
@@ -118,6 +131,9 @@ const helpTexts = new Map<string, string>([
   ["schedule", scheduleHelp],
   ["unschedule", scheduleHelp],
   ["schedules", scheduleHelp],
+  ["secret", secretHelp],
+  ["unsecret", secretHelp],
+  ["secrets", secretHelp],
   ["model", modelHelp],
   ["help", helpHelp],
 ])
@@ -133,6 +149,7 @@ export interface ControlOptions {
   registerHint: string
   qrCode: QrCodeSize
   model?: ModelSelection
+  secrets?: Secrets
 }
 
 export interface Command {
@@ -154,7 +171,9 @@ type OwnerRequest =
   | {type: "leave" | "deleteFiles"; chat: string}
   | {type: "schedule"; chat: string; cron: string; prompt: string}
   | {type: "unschedule"; chat: string; n: number}
-  | {type: "pending" | "list" | "schedules"}
+  | {type: "secret"; name: string; value: string}
+  | {type: "unsecret"; name: string}
+  | {type: "pending" | "list" | "schedules" | "secrets"}
   | {type: "model"; name?: string}
   | {type: "help"; topic: string}
 
@@ -192,8 +211,8 @@ export class Control implements Pick<ActionHooks, "refusal" | "saveCounter" | "p
     if (isLost(this.group)) return this.lose()
     const {groupProfile} = this.group
     const commands = this.options.model === undefined ? controlCommands : [...controlCommands, modelCommand]
-    if (groupProfile.displayName !== this.options.displayName || JSON.stringify(groupProfile.groupPreferences?.commands) !== JSON.stringify(commands)) {
-      this.group = await this.chat.apiUpdateGroupProfile(this.groupId, {...groupProfile, displayName: this.options.displayName, groupPreferences: {...groupProfile.groupPreferences, commands}})
+    if (groupProfile.displayName !== this.options.displayName || JSON.stringify(groupProfile.groupPreferences?.commands) !== JSON.stringify(commands) || groupProfile.groupPreferences?.fullDelete?.enable !== fullDelete.enable) {
+      this.group = await this.chat.apiUpdateGroupProfile(this.groupId, {...groupProfile, displayName: this.options.displayName, groupPreferences: {...groupProfile.groupPreferences, fullDelete, commands}})
     }
     await this.refreshMembers()
     for (const {chatInfo} of await this.tools.agentChats()) this.schedules.set(chatRef(chatInfo)!, schedulesOf(customDataOf(chatInfo)))
@@ -274,12 +293,15 @@ export class Control implements Pick<ActionHooks, "refusal" | "saveCounter" | "p
   onMessage(ci: T.AChatItem): void {
     const {chatItem} = ci
     if (this.actions.lost || chatItem.chatDir.type !== "groupRcv" || chatItem.content.type !== "rcvMsgContent") return
+    const secret = /^\s*\/secret(\s|$)/i.test(chatItem.content.msgContent.text)
+    if (ci.chatInfo.type === "group" && ci.chatInfo.groupChatScope !== undefined) return secret ? this.queueAfterReplies(() => this.chat.apiDeleteMemberChatItem(this.groupId, [chatItem.meta.itemId])) : undefined
     const command = parseCommand(chatItem.content.msgContent.text)
-    if (command === undefined) return
+    if (command === undefined && !secret) return
     const sender = chatItem.chatDir.groupMember
     this.ownerCommands = this.ownerCommands
-      .then(() => this.ownerCommand(sender, command))
-      .then(reply => (reply === undefined ? undefined : this.chat.apiSendTextReply(ci, reply)))
+      .then(() => (secret ? this.chat.apiDeleteMemberChatItem(this.groupId, [chatItem.meta.itemId]) : undefined))
+      .then(() => (command === undefined ? secretUsage : this.ownerCommand(sender, command)))
+      .then((reply): Promise<unknown> | undefined => (reply === undefined ? undefined : secret ? this.post(reply) : this.chat.apiSendTextReply(ci, reply)))
       .catch(error => logError("control chat command", error))
   }
 
@@ -330,6 +352,12 @@ export class Control implements Pick<ActionHooks, "refusal" | "saveCounter" | "p
         return this.leave(sender, request.chat)
       case "deleteFiles":
         return this.deleteFiles(request.chat)
+      case "secret":
+        return this.options.secrets === undefined ? secretsOff : this.setSecret(this.options.secrets, sender, request.name, request.value)
+      case "unsecret":
+        return this.options.secrets === undefined ? secretsOff : this.removeSecret(this.options.secrets, sender, request.name)
+      case "secrets":
+        return this.options.secrets === undefined ? secretsOff : this.secretsText(this.options.secrets)
       case "model":
         return this.switchModel(sender, request.name)
       case "approve":
@@ -497,6 +525,29 @@ export class Control implements Pick<ActionHooks, "refusal" | "saveCounter" | "p
     const rest = lines.length - listedSchedules
     if (rest > 0) lines.splice(listedSchedules, rest, `${rest} more schedule${rest === 1 ? " is" : "s are"} not shown.`)
     return lines.length > 0 ? lines.join("\n") : "No schedules."
+  }
+
+  private setSecret(secrets: Secrets, sender: T.GroupMember, name: string, value: string): string {
+    if (!secretName.test(name) || [...value].length < 8) return secretUsage
+    const setBy = sender.memberProfile.displayName
+    secrets.set(name, value, {setBy, setById: sender.groupMemberId, setAt: new Date().toISOString()})
+    log(`Secret ${name} set by ${oneLine(setBy)}.`)
+    return `Secret ${name} is set. /'unsecret ${name}'`
+  }
+
+  private removeSecret(secrets: Secrets, sender: T.GroupMember, name: string): string {
+    if (!secrets.remove(name)) return "No such secret. /secrets lists them."
+    log(`Secret ${name} removed by ${oneLine(sender.memberProfile.displayName)}.`)
+    return `Secret ${name} is removed.`
+  }
+
+  private secretsText(secrets: Secrets): string {
+    const records = secrets.records()
+    const lines = secrets.names().map(name => {
+      const record = records[name]
+      return record === undefined ? name : `${name}  set by ${safeName(record.setBy)}  ${utcMinutes(Date.parse(record.setAt))}`
+    })
+    return lines.length > 0 ? lines.join("\n") : "No secrets."
   }
 
   private async agentChat(chat: string): Promise<T.ChatInfo | undefined> {
@@ -685,7 +736,7 @@ export async function createControlChat(chat: api.ChatApi, userId: number, displ
     displayName,
     fullName: "",
     description: "Supervise your AI agent here: approve or reject its connections and messages with one tap.",
-    groupPreferences: {history: {enable: T.GroupFeatureEnabled.On}, commands: controlCommands},
+    groupPreferences: {history: {enable: T.GroupFeatureEnabled.On}, fullDelete, commands: controlCommands},
   })
   const customData = controlData(nextAction)
   await chat.apiSetGroupCustomData(group.groupId, customData)
@@ -912,7 +963,9 @@ function ownerRequest({keyword, params}: Command): OwnerRequest | undefined {
   if (keyword === "copies" && chat !== undefined && (value === "on" || value === "off")) return {type: keyword, chat, on: value === "on"}
   if (keyword === "leave" && chat === undefined && value !== undefined && isChatRef(value)) return {type: keyword, chat: value}
   if (keyword === "delete" && chat !== undefined && value === "files") return {type: "deleteFiles", chat}
-  if ((keyword === "pending" || keyword === "list" || keyword === "schedules") && words.length === 0) return {type: keyword}
+  if (keyword === "secret") return {type: keyword, name: words[0] ?? "", value: params.replace(/^\S*\s*/, "")}
+  if (keyword === "unsecret" && words.length === 1) return {type: keyword, name: words[0]}
+  if ((keyword === "pending" || keyword === "list" || keyword === "schedules" || keyword === "secrets") && words.length === 0) return {type: keyword}
   if (keyword === "model" && words.length <= 1) return {type: keyword, name: words.at(0)}
   if (keyword === "help") return {type: keyword, topic: params.replace(/^\/(?=.)/, "")}
   return undefined
