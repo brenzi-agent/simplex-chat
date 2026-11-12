@@ -1486,11 +1486,14 @@ export function isConnected(chatInfo: T.ChatInfo): boolean {
 
 function postingRefusal(chat: string, chatInfo: T.ChatInfo): string | undefined {
   if (!isConnected(chatInfo)) return `The agent is not connected to ${chat} and can't post; list shows connected: false.`
-  if (chatInfo.type === "group") {
-    const role = chatInfo.groupInfo.membership.memberRole
-    if (role === T.GroupMemberRole.Observer || role === T.GroupMemberRole.Relay) return `The agent has role ${role} in ${chat} and can't post.`
-  }
+  const role = readOnlyRole(chatInfo)
+  if (role !== undefined) return `The agent has role ${role} in ${chat} and can't post.`
   return undefined
+}
+
+export function readOnlyRole(chatInfo: T.ChatInfo): T.GroupMemberRole | undefined {
+  const role = chatInfo.type === "group" ? chatInfo.groupInfo.membership.memberRole : undefined
+  return role === T.GroupMemberRole.Observer || role === T.GroupMemberRole.Relay ? role : undefined
 }
 
 export function isActive({memberStatus}: T.GroupMember): boolean {

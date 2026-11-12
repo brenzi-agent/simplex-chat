@@ -74,6 +74,8 @@ To prompt it on a schedule, send in "My Agent", with your chat's ID from `/list`
 
 In a new Claude Code session, give the same prompt again. The agent can recall the conversation: `receive` with `history` returns up to 50 earlier messages of that chat, its own answers included.
 
+When its server starts, the agent posts `SimpleX MCP server 0.2.0 (8e4b6f1c2d) started.` in "My Agent" and in each chat approved with `all` for its messages, such as this one, unless it is incognito there: you see when it restarted, and the version and commit of its build.
+
 ## Safety
 
 - The agent asks in "My Agent" before it connects, sends a message or a file, downloads a file or leaves; you approve or reject. On a download card, `/receive` gives the agent the file, and `/forward` sends it only to you.
