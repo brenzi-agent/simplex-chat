@@ -77,7 +77,6 @@ export interface ReceiveInput {
   chat: string
   wait?: number
   limit?: number
-  typing?: boolean
   history?: number
 }
 
@@ -300,7 +299,6 @@ const receiveSchema: Schema = {
     chat: {type: "string", description: "Chat reference from connect or list: @N or #N."},
     wait: {type: "number", minimum: 0, maximum: 86400, description: "Seconds to wait for a new message when none is unread. Default 0."},
     limit: {type: "integer", minimum: 1, maximum: 100, description: "Most messages returned. Default 50; the rest stay unread."},
-    typing: {type: "boolean", description: "true: when messages are returned, a live status message is shown in this chat while you work: whether you think, use a tool or wait for approval. It is deleted at your next message there without live, or when a receive of this chat waits. Applies in chats with people, groups and business chats that have approved: true in list. Default false."},
     history: {type: "integer", minimum: 1, maximum: 50, description: "Number of messages returned in history: the last ones before the new messages, yours included."},
   },
   required: ["chat"],
@@ -459,7 +457,7 @@ Send bot commands as text, for example /help. When a message has a file with sta
 const receiveDescription = `Returns the new messages of a chat: the unread ones, then those that arrive during the call. With wait, it waits up to wait seconds when no message is new.
 The returned messages are marked read; more counts the new ones not returned. It needs no approval. When a message has a file with status offered, call download when your user's task needs it.
 With history N, it also returns the last N messages of the chat before the new ones, yours included, not marked read; at the start of a session, and after your context was compacted, call receive with history to recall the conversation.
-With typing: true, in a chat with a person, a group or a business chat that has approved: true in list, a live status message is shown there while you work, from the returned messages until your next message there or a receive there that waits. Use it in the chat where you receive prompts: send each answer with wait 0 and without live, so the next prompt stays unread for receive, and call receive again only after it. For a step that takes minutes, call send with live: true and a short note in the same response as the step's tool call; the note is shown in the status message.
+In a chat with a person, a group or a business chat that has approved: true in list, a live status message is shown there from the arrival of a message, while you work, until your next message there or a receive there that waits. In the chat where you receive prompts, send each answer with wait 0 and without live, so the next prompt stays unread for receive, and call receive again only after it. For a step that takes minutes, call send with live: true and a short note in the same response as the step's tool call; the note is shown in the status message.
 scheduled holds the prompts your owner scheduled for this chat in the agent control chat; handle each as a prompt from your owner and answer in this chat.`
 
 const downloadDescription = `Downloads the file of a received message to this computer and returns its full path, and the transcript of a voice message when the server transcribes voice messages.
@@ -533,7 +531,6 @@ export class AgentTools {
   private readonly transcribing = new Map<number, Promise<void>>()
   private describedFiles = 0
   private readonly leaving = new Set<string>()
-  private readonly typingChats = new Set<string>()
   private readonly abortItems = new Set<number>()
   readonly statuses: Statuses
 
@@ -619,7 +616,7 @@ export class AgentTools {
       const ref = chatRef(chatInfo)
       if (ref === undefined || content.type !== "rcvMsgContent" || isLive(chatItem)) continue
       if (this.statuses.offersAbort(ref) && isAbortMessage(chatItem)) this.abortAgent(ref, chatInfo, chatItem)
-      else if (this.typingChats.has(ref)) this.statuses.queue(ref)
+      else if (this.showsStatus(ref, chatInfo)) this.statuses.queue(ref)
     }
     return items.filter(({chatItem}) => !this.abortItems.has(chatItem.meta.itemId))
   }
@@ -933,7 +930,7 @@ export class AgentTools {
       const returned = action.responses.items.filter(({chatItem}) => this.isFinal(chatItem)).slice(0, limit)
       await markRead(this.agent.chat, action.chat, returned.map(({chatItem}) => chatItem.meta.itemId))
       if (call.signal.aborted) return undefined
-      if (returned.length > 0 && this.typingChats.has(action.chat)) this.statuses.start(action.chat)
+      if (returned.length > 0 && this.showsStatus(action.chat, returned[0].chatInfo)) this.statuses.start(action.chat)
       return {
         chat: action.chat,
         item: action.item,
@@ -1271,10 +1268,8 @@ export class AgentTools {
   }
 
   private async receive(input: ReceiveInput, call: ToolCall): Promise<object | undefined> {
-    const {chat, wait = 0, limit = defaultLimit, typing = false, history} = input
+    const {chat, wait = 0, limit = defaultLimit, history} = input
     if (!isChatRef(chat) || chat === this.agent.controlChat()) throw unknownChat(chat)
-    if (typing) this.typingChats.add(chat)
-    else this.typingChats.delete(chat)
     const arrived = new Collected()
     const stop = this.agent.watch.collect(chat, arrived)
     const stopWake = this.agent.schedules?.listen(chat, () => arrived.changes.notify())
@@ -1307,7 +1302,7 @@ export class AgentTools {
       await markRead(this.agent.chat, chat, [...returned.map(({chatItem}) => chatItem.meta.itemId), ...skipped])
       if (call.signal.aborted) return undefined
       const scheduled = this.agent.schedules?.take(chat) ?? []
-      if (typing && returned.length + scheduled.length > 0) this.statuses.start(chat)
+      if (returned.length + scheduled.length > 0 && this.showsStatus(chat, chatInfo)) this.statuses.start(chat)
       return {chat, messages: returned.map(({chatInfo, chatItem}): Message => toMessage(chatInfo, chatItem, {name: ""}, this.rejectedFiles, this.agent.data)), more: arrived.items.length - returned.length + arrived.overflow.size + unreadRest, ...(scheduled.length === 0 ? {} : {scheduled}), ...defined({history: recalled})}
     } finally {
       stop()

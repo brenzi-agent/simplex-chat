@@ -48,7 +48,7 @@ Give Claude Code your SimpleX address:
 ```
 Connect to me as yourself at <your SimpleX address>, with the message:
 "I'm your agent, connected as you asked in Claude Code. I'll act on your prompts here, except security-sensitive ones."
-Then take my prompts from that chat and answer there: wait for my messages with receive (wait 3600, typing true),
+Then take my prompts from that chat and answer there: wait for my messages with receive (wait 3600),
 answer each one in that chat with send (wait 0), and call receive again after every answer, until I say stop.
 ```
 
@@ -56,7 +56,7 @@ Or give it the link of a group of yours, where every member prompts it:
 
 ```
 Connect as yourself to my group at <your group link>.
-Then take the prompts of its members from that group and answer there: wait for their messages with receive (wait 3600, typing true),
+Then take the prompts of its members from that group and answer there: wait for their messages with receive (wait 3600),
 answer each one in that group with send (wait 0), and call receive again after every answer, until I say stop.
 ```
 
