@@ -1875,6 +1875,12 @@ function postingRefusal(chat: string, chatInfo: T.ChatInfo): string | undefined 
 }
 
 // spec: spec/architecture.md#tools-chatsubject
+export function readOnlyRole(chatInfo: T.ChatInfo): T.GroupMemberRole | undefined {
+  const role = chatInfo.type === "group" ? chatInfo.groupInfo.membership.memberRole : undefined
+  return role === T.GroupMemberRole.Observer || role === T.GroupMemberRole.Relay ? role : undefined
+}
+
+// spec: spec/architecture.md#tools-chatsubject
 export function isActive({memberStatus}: T.GroupMember): boolean {
   return memberStatus === T.GroupMemberStatus.Connected || memberStatus === T.GroupMemberStatus.Complete
 }

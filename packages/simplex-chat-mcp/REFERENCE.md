@@ -76,7 +76,7 @@ At its first start the server downloads the SimpleX core library, 29 to 50 MB de
 
    `-y` answers npm's prompt to install the package. The server asks no questions: every choice is an option. The QR code of such a link is 37 columns wide and 19 lines high; `--qr-code large` draws it twice as wide and twice as high. Ctrl-C stops the server, see [Expiry](#expiry).
 
-2. In the SimpleX app, scan the QR code or open the link, and tap Join. The chat "My Agent" appears in the chat list, and the agent writes: `I'm your agent. I ask here before I connect, send, download a file or leave a chat.` The terminal prints:
+2. In the SimpleX app, scan the QR code or open the link, and tap Join. The chat "My Agent" appears in the chat list, from the next version with the [restart notice](#restart-notice) of this start, and the agent writes: `I'm your agent. I ask here before I connect, send, download a file or leave a chat.` The terminal prints:
 
    ```
    Alice joined (member 3) and is now an owner. The link is deleted.
@@ -397,6 +397,18 @@ My Agent: /approve N or /approve CHAT N performs pending action N, other than a 
 The forms in the reply to `/help` are tappable, and each is sent as written, placeholders included.
 
 Every member who can post in the agent control chat gets these replies; the agent accepts the other commands from approvers only.
+### Restart notice
+
+From the next version, at each start, after the owner setup, the agent posts its version and the commit of its build:
+
+```
+My Agent: SimpleX MCP server VERSION (8e4b6f1c2d) started.
+```
+
+- It is posted in the agent control chat and, in mode `requests`, in each chat approved for all messages where the agent is connected, can post by its role, and is not incognito.
+- VERSION is the package version, and `8e4b6f1c2d` is the commit the package was built from, as `git rev-parse --short=10 HEAD` printed it at `npm pack` or `npm publish`. No commit is written by `npx tsc`: with a build by it alone, the notice is `SimpleX MCP server VERSION started.` The same version is in the first line the server prints: `SimpleX MCP server VERSION (8e4b6f1c2d), agent "my-agent"`.
+- The server posts it by itself: it is not an action, and no card is posted for it. An owner who joins later receives it among the chat's recent messages.
+- A failed post is logged on stderr, for example `restart notice to #9: <error>`, and the server continues the start. After the agent lost its control chat, no notice is posted.
 
 ## What the agent sees
 
@@ -629,6 +641,8 @@ To prompt it on a schedule, send in "My Agent", with your chat's ID from `/list`
 `0 7 * * 1-5` is cron syntax for 07:00 on weekdays, server time. At that time the agent gets this prompt from its next `receive` in your chat, and answers you there. Send `/schedules` to list the schedules, and `/unschedule @5 1` to remove this one.
 
 In a new Claude Code session, give the same prompt again. The agent can recall the conversation: `receive` with `history` returns up to 50 earlier messages of that chat, its own answers included.
+
+From the next version, when its server starts, the agent posts `SimpleX MCP server VERSION (8e4b6f1c2d) started.` in "My Agent" and in each chat approved with `all` for its messages, such as this one, unless it is incognito there: you see when it restarted, and the version and commit of its build ([restart notice](#restart-notice)).
 
 ## Several agents
 
@@ -984,6 +998,7 @@ One server runs per data folder: a second one exits, because two processes on on
 - With the status hooks in scope `user`, Claude Code passes the events of every session of the user to curl, which posts them to the agent's server, with prompts, commands, file contents and tool results. The server uses only the fields named in [Status hooks](#status-hooks), keeps state only for the sessions that used the agent's tools, and logs nothing. curl ignores `.curlrc` files and proxy variables, so the events and the token are sent only to 127.0.0.1.
 - Only approvers schedule prompts, and a schedule's prompts become due only while the owner who added it is an approver. `receive` returns them in `scheduled`, apart from the chat's messages.
 - After `/approve #N all`, the agent sends to that chat without asking, files included; `/revoke #N` ends it. With `/copies #N off`, these messages are not copied to the agent control chat.
+- After `/approve #N all`, the agent sends to that chat without asking, files included, and, from the next version, at each start the server posts there its version and the commit of its build, unless the agent is incognito there; `/revoke #N` ends it.
 - The server refuses to send private keys, its own files and the files under `~/.simplex-mcp`, where agents keep their data, except the files under `files/` of its own data folder; other files the agent can read are sent after approval.
 - The server refuses to send private keys, its own files, the secrets and the files under `~/.simplex-mcp`, where agents keep their data, except the files under `files/` of its own data folder; other files the agent can read are sent after approval.
 - With secrets, values are protected from accidental exposure to the model provider: the server deletes `/secret` messages for all members, and the agent gets the names, not the values. A prompt injection can make the agent send a value away by reference, for example in a command that reads the file of a secret into a request to another host; this is out of scope.

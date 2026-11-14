@@ -35,6 +35,9 @@ An owner can also schedule prompts for a chat with `/schedule CHAT CRON PROMPT` 
 The server keeps actions, downloads and due scheduled prompts in memory, and they are lost when the process exits. The action counter, the standing approvals and the schedules are stored as custom data in the chat database. The token, the headers files for the host and its hooks, the server record and the lock are files in the data folder; downloaded files are in its `files` folder, one folder per chat, with the transcripts of voice files beside them.
 
 With `--secrets-folder`, an approver sets a secret with `/secret NAME VALUE` in the control chat: the server deletes the message for all members and writes the value to a file of the secrets folder. `list` returns the folder and the names, and the agent uses a value in shell commands by its path. With the package's opencode plugin, the values are replaced in the requests that opencode sends to the model.
+From the next version, at each start, after the owner setup and unless the control chat is lost, the server posts `SimpleX MCP server VERSION (COMMIT) started.` in the agent control chat and in the chats under a standing approval of messages where the agent can post as itself. COMMIT is the commit of the build, from `dist/commit.txt` of the package; without the file, ` (COMMIT)` is left out.
+
+The server keeps actions and downloads in memory, and they are lost when the process exits. The action counter and the standing approvals are stored as custom data in the chat database. The token, the headers file for the host, the server record and the lock are files in the data folder; downloaded files are in its `files` folder, one folder per chat.
 
 The package is also a Claude Code plugin. Each Claude Code session runs `simplex-mcp session`, a stdio MCP server. The session server forwards tool calls over a local socket to `simplex-mcp service`, one service per data root. Requests on the socket are HTTP/1.1 with a bearer token. The service runs two cores:
 - `Claude` is the profile that peers see. It holds the Main group, one group per session and the chats with peers. In a session's group it posts Claude's texts and answers, one line for each step, for each of Claude Code's own prompts and for each summary of the session's context, and the end line of each turn.
@@ -226,6 +229,8 @@ graph TD
 | [`audio.ts`](../src/audio.ts) | speech-to-text and text-to-speech requests, the queue of transcriptions, transcript files |
 | [`control.ts`](../src/control.ts) | agent control chat and session groups: link, owners, owner commands, cards, counter |
 | [`messages.ts`](../src/messages.ts) | message items and their files, item watch, waits, unread and history paging, display names |
+| [`control.ts`](../src/control.ts) | agent control chat and session groups: link, owners, owner commands, cards, counter, restart notice |
+| [`messages.ts`](../src/messages.ts) | message items and their files, item watch, waits, unread paging, display names |
 | [`core.ts`](../src/core.ts) | one SimpleX core: init, user, network config, temp folder, event buffer, profile update |
 | [`files.ts`](../src/files.ts) | data folders, lock, token, `headers.json`, `hook-headers`, `server.json`, session folders, socket path, service log, the abort count of `--abort-file` |
 | [`files.ts`](../src/files.ts) | data folders, lock, token, `headers.json`, `server.json`, session folders, socket path, service log, the secrets folder and `secrets.json` |
