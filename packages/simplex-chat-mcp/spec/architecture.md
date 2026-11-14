@@ -288,7 +288,7 @@ Hooks are bound in [`startAgent`](../src/serve.ts), where `actions` is created: 
 | <a id="control-control-ongroupupdated"></a>`Control.onGroupUpdated` | an owner's update of the group's profile: an update that turns full deletion on when it is off, queued with the owner commands, so a later `/secret` is deleted after it |
 | <a id="control-control-onevent"></a>`Control.onEvent` | membership changes and loss of the control chat. `lose`, at a loss of the group and at `load` of a lost group, ends the tool approvals and calls `toolsChanged`. |
 | <a id="control-control-ownercommand"></a>`Control.ownerCommand` | command dispatch and replies. A text outside the requests is answered with the command list, or with `Unknown command.` in a group of the plugin's session, where the `/help` texts are those of `sessionHelpTexts`. |
-| <a id="control-control-approvechat"></a>`approveChat`, `revoke`, `addSchedule`, `removeSchedule`, `forward`, `leave`, `deleteFiles` | owner requests |
+| <a id="control-control-approvechat"></a>`approveChat`, `revoke`, `copies`, `addSchedule`, `removeSchedule`, `forward`, `leave`, `deleteFiles` | owner requests |
 | <a id="control-control-schedulestext"></a>`schedulesText` | the `/schedules` reply |
 | <a id="control-control-approvedtools"></a>`approvedTools`, `endToolApprovals`, `approveTool`, `revokeTool` | the approvals of tools of a group of the plugin's session, in memory, by tool name, with the approver's name and member ID. `approvedTools` returns those whose approver is an approver now. `approveTool` records the tool of a pending `permission` action, logs, calls `toolsChanged`, approves the action and replies with `/'revoke TOOL'`. `revokeTool` deletes one, logs and calls `toolsChanged`. `endToolApprovals` drops all; it also runs when the session's group is lost. `chatsText` lists the approved tools after the chats, and `setObserver` calls `toolsChanged` after it reads the members again. |
 | <a id="control-control-give"></a>`give`, `setObserver` | `/give CHAT N` and `/observer #G ID` in a group of the plugin's session. At `give`, the entries of CHAT are moved from the session's `Schedules` to those of session N. `setObserver` replies `NAME's role can't be changed.` for a member with status `pending_approval` or `pending_review`. For a member who is neither current nor pending, such as an invited member who has not joined, the reply is `No member ID in this group.` ([`memberCurrentOrPending`](../src/tools.ts)). Only a current member's role is set to `observer`, when the sender's role is admin or owner and not below the member's role. The members are then read again, and the observer's rights are the reply. |
@@ -597,6 +597,7 @@ Scheduled prompts of the agent's chats.
 | Standing approval of messages | contact or group of the agent | `{...other keys, simplexMcp: {approvedBy, approvedById, approvedAt}}` | [`approveChat`](../src/control.ts), [`revoke`](../src/control.ts) | [`standingApprover`](../src/control.ts) |
 | Files approval | contact or group of the agent | `{...other keys, simplexMcpFiles: {approvedBy, approvedById, approvedAt}}` | [`approveChat`](../src/control.ts), [`revoke`](../src/control.ts) | [`standingApprover`](../src/control.ts) |
 | Schedules | contact or group of the agent | `{...other keys, simplexMcpSchedules: [{cron, prompt, by, byId, at}, ...]}` | [`addSchedule`](../src/control.ts), [`removeSchedule`](../src/control.ts) | [`schedulesOf`](../src/control.ts) |
+| Copies off | contact or group of the agent | `{...other keys, simplexMcpCopies: false}` | [`copies`](../src/control.ts) | [`copiesOff`](../src/control.ts) |
 
 The profile, chats, items, members and file transfers are stored by the core in `DATA/simplex_chat.db`; connections and queues in `DATA/simplex_agent.db` (file prefix `DATA/simplex`, [`startServer`](../src/serve.ts)).
 
@@ -727,7 +728,7 @@ The mode is set by `--approve` for one run ([`serveOptions`](../src/cli.ts)).
 
 | Mode | State of a new action | Card | `_meta` of `connect`, `send`, `download`, `leave` |
 |---|---|---|---|
-| `requests` | `pending`<br>`performing` for a send under a standing approval, and for a download under a files approval | card with commands<br>outcome as a new message after a standing send; none after a download without a card | none |
+| `requests` | `pending`<br>`performing` for a send under a standing approval, and for a download under a files approval | card with commands<br>outcome as a new message after a standing send, unless it is done and its chat's copies are off; none after a download without a card | none |
 | `host` | `performing` | outcome as a new message after the perform; none for a download | `{"anthropic/requiresUserInteraction": true}` |
 
 The mode in which an action is created is kept in `ActionRecord.mode`. The action's card and log line are written for that mode ([`Actions.create`](../src/actions.ts), [`Control.refusal`](../src/control.ts)).
@@ -825,7 +826,7 @@ An action is removed from memory when its result is returned to a call ([`action
 
 ### 5.4 Cards
 
-The server posts a card when a `pending` action is created, and edits it with `apiUpdateChatItem` at the outcome ([`Actions.post`](../src/actions.ts), [`Control.outcome`](../src/control.ts)). For a `connect`, `send` or `leave` without a card (mode `host`, standing sends) the server posts the outcome as a new message; a `download` without a card gets none ([`hasOutcomeCard`](../src/control.ts)). The text per state is built by [`cardText`](../src/control.ts). A card of a `send` or `download` of an image or video file is an image or video message with the file's preview. In a plugin session group where files and media are refused by the group's preference, the card is text ([`Control.postCardContent`, `cardContent`, `fittedImage`](../src/control.ts)). The forms are listed in [API: cards](api.md#22-cards).
+The server posts a card when a `pending` action is created, and edits it with `apiUpdateChatItem` at the outcome ([`Actions.post`](../src/actions.ts), [`Control.outcome`](../src/control.ts)). For a `connect`, `send` or `leave` without a card (mode `host`, standing sends) the server posts the outcome as a new message; a `download` without a card gets none ([`hasOutcomeCard`](../src/control.ts)), and neither does a `done` standing send to a chat with `simplexMcpCopies: false` ([`Control.outcome`, `copiesOff`](../src/control.ts)). The text per state is built by [`cardText`](../src/control.ts). A card of a `send` or `download` of an image or video file is an image or video message with the file's preview. In a plugin session group where files and media are refused by the group's preference, the card is text ([`Control.postCardContent`, `cardContent`, `fittedImage`](../src/control.ts)). The forms are listed in [API: cards](api.md#22-cards).
 
 Outcomes are posted after `done` and `failed` ([`Actions.runPerform`](../src/actions.ts)), after `rejected` and `expired` ([`Actions.reject`, `expire`](../src/actions.ts)), and at stop ([`Actions.stop`](../src/actions.ts)). They are skipped after the control chat is lost ([`Actions.stop`, `runPerform`, `updateCard`](../src/actions.ts)).
 
@@ -838,6 +839,9 @@ Outcomes are posted after `done` and `failed` ([`Actions.runPerform`](../src/act
 | removal | `/revoke CHAT`: the `simplexMcp` key is removed, other keys kept | `/receive CHAT off`: the `simplexMcpFiles` key is removed | [`Control.revoke`](../src/control.ts) |
 | use | mode `requests`, the control chat not lost, and `approvedById` equal to the `groupMemberId` of a current approver | the same | [`Control.standingApprover`, `isCurrentApprover`](../src/control.ts) |
 | scope | `send`; status messages and notes in the chat ([API 1.10](api.md#110-status-message)), so after `/revoke` the chat's status message is deleted at its next tick | `download` of a file whose servers are all known; with `--audio`, the download and transcription of a voice message at its arrival | [`AgentTools.send`, `statusRefusal`, `download`, `transcribesAtArrival`, `transcribeOnArrival`](../src/tools.ts), [`Statuses.tick`](../src/status.ts) |
+| copies | `/copies CHAT off` stores `simplexMcpCopies: false`, and the outcomes of `done` sends are not posted; `/copies CHAT on` removes it; `/revoke CHAT` keeps it | none: downloads under it post nothing | [`Control.copies`, `outcome`](../src/control.ts) |
+| use | mode `requests`, and `approvedById` equal to the `groupMemberId` of a current approver | the same | [`Control.standingApprover`](../src/control.ts) |
+| scope | `send` | `download` of a file whose servers are all known | [`AgentTools.send`, `download`](../src/tools.ts) |
 | decider shown | `safeName(approvedBy)` | the same | [`Control.standingApprover`](../src/control.ts) |
 | storage | the chat's custom data; removed with the chat by `leave` | the same | [`AgentTools.leaveChat`](../src/tools.ts) |
 
@@ -933,6 +937,7 @@ Node limits: `requestTimeout` 0, `timeout` 0, `headersTimeout` 60 s, `keepAliveT
 
 The server writes the tappable form `/'...'` only in the card's command line ([`commandsLine`](../src/control.ts)), in `/'revoke CHAT'` of standing cards and replies ([`cardText`, `Control.approveChat`](../src/control.ts)), in `/'delete CHAT files'` of the kept-files message ([`Control.leftChatFilesNote`](../src/control.ts)), in `/'unschedule CHAT N'` of the `/schedule` replies ([`Control.addSchedule`](../src/control.ts)), in the `/help` texts ([`helpTexts`, `sessionHelpTexts`](../src/control.ts)), and in `/schedules` lines, where an approver's prompt is shown with its `/'...'` forms ([`Control.schedulesText`](../src/control.ts)).
 The server writes the tappable form `/'...'` only in the card's command line ([`commandsLine`](../src/control.ts)), in `/'revoke CHAT'` of standing cards and replies ([`cardText`, `Control.approveChat`](../src/control.ts)), in `/'delete CHAT files'` of the kept-files message ([`Control.leftChatFilesNote`](../src/control.ts)), and in `/'unsecret NAME'` of the reply to `/secret`, with NAME of capital letters, digits and `_` only ([`setSecret`](../src/control.ts), [`secretName`](../src/files.ts)).
+The server writes the tappable form `/'...'` only in the card's command line ([`commandsLine`](../src/control.ts)), in `/'revoke CHAT'` of standing cards and replies ([`cardText`, `Control.approveChat`](../src/control.ts)), in `/'copies CHAT off'` of standing cards and `/'copies CHAT on'` of the replies to `/copies CHAT off` and `/approve CHAT all` ([`cardText`, `Control.copies`, `approveChat`](../src/control.ts)), and in `/'delete CHAT files'` of the kept-files message ([`Control.leftChatFilesNote`](../src/control.ts)).
 
 ### 6.4 Chat references
 
@@ -1427,7 +1432,7 @@ Chat database custom data is in the core `_hub` unless noted:
 | Session group | group of session N | `{simplexMcpSession: {session: N, pending?: [{connId, at}], mode?}}`, where `mode` is the approved mode | [`createSessionGroup`](../src/hub.ts), [`setMode`](../src/hub.ts), [`savePending`](../src/hub.ts), [`claimPending`](../src/hub.ts) | [`storedGroup`](../src/hub.ts), [`Session` constructor](../src/hub.ts), [`claimPending`](../src/hub.ts) |
 | Action counter | group of session N | `{simplexMcp: {control: true, nextAction}}`, merged with the other keys | [`saveCounter`, `saveData`](../src/control.ts) | [`Session` constructor](../src/hub.ts) |
 | Chat owner | contact or group of a peer | `{...other keys, simplexMcpOwner: {session: ID}}` | [`claim`](../src/tools.ts), [`giveChat`](../src/tools.ts) | [`owns`](../src/tools.ts) |
-| Standing approvals | contact or group of a peer | as in [3.2](#32-chat-database-custom-data) | `Control` of the owning session's group | the same |
+| Standing approvals and copies off | contact or group of a peer | as in [3.2](#32-chat-database-custom-data) | `Control` of the owning session's group | the same |
 | User contact | the hub's contact of `User` | `{simplexMcpUser: true}` | [`User.connect`](../src/user.ts) | [`userContact`](../src/user.ts) |
 | Claude contact | in `_user`: the contact of `Claude` | `{simplexMcpClaude: true}` | [`User.onEvent`](../src/user.ts) | [`User.onEvent`](../src/user.ts) |
 | Session of a group | in `_user`: a session group | `{simplexMcpSession: N}` | [`User.onEvent`](../src/user.ts) | [`User.post`](../src/user.ts) |

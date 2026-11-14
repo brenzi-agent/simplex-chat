@@ -277,6 +277,7 @@ Commands:
 | `/reject N`, `/reject #9 N` | Rejects action N. |
 | `/approve #9 all` | Approves all the agent's messages to chat #9: the pending ones and later ones. |
 | `/revoke #9` | Ends that approval: each message to #9 needs approval again. |
+| `/copies #9 off`, `/copies #9 on` | Stops or resumes the copies of the agent's messages to chat #9 that are posted here under that approval. |
 | `/receive #3 7` | The agent receives the file of download 7: the server downloads it, and the agent's call returns its path. |
 | `/receive #3 7 all` | The same, and the agent receives its later downloads from chat #3 of files on its XFTP servers without asking. Other pending downloads of #3 stay pending. |
 | `/receive #3 off` | Ends that: each download from #3 needs approval again. |
@@ -290,6 +291,7 @@ Commands:
 | `/schedules` | Lists the schedules of all chats. |
 | `/help` | Lists the commands, one line each: [Help](#help). |
 | `/help schedule` | Shows how to use `/schedule`, with an example. |
+| `/list` | Lists the agent's 100 most recent chats, one line each, and which of them are approved for all messages or all files: `, approved for this chat by NAME` and `, files approved by NAME`; `, copies off` when their copies are off, in mode `requests`; a last line counts the older chats. |
 
 After `/leave #9`, or after the agent's `leave` of #9 is performed in either mode, when the chat's folder has files, the agent posts ``Files from business Ridgeline (#9) are kept in `/home/alice/.simplex-mcp/my-agent/files/group-9`: 3 files, 2.1 MB. /delete #9 files``. The files forwarded from #9 are deleted when the agent leaves it.
 
@@ -309,13 +311,14 @@ After `/approve #9 all`, the agent's messages to #9 are sent at once, and each o
 ```
 My Agent: I sent a message to business Ridgeline, where I am incognito:
           `Thanks, I'll order.`
-          Approved for this chat by Alice. /revoke #9
+          Approved for this chat by Alice. /revoke #9 or /copies #9 off
 ```
 
 - It covers messages, status messages and notes only: connecting and leaving are approved one by one.
 - It lasts until `/revoke`, until the chat is deleted, or until the approving owner is no longer an approver. It survives restarts: it is kept in the agent's database, as custom data of that chat.
 - With it, the agent can send anything it can read, without asking, to everyone in that chat.
 - It applies in mode `requests` only: in mode `host`, `list` and `/list` show no approvals.
+- `/copies #9 off` stops these copies, and `/copies #9 on` resumes them. The card of a failed send is still posted. The setting is kept in the chat's custom data, also after `/revoke`, so a later `/approve #9 all` replies with the line `Copies are off: /copies #9 on`.
 
 ### Receiving all files from a chat
 
@@ -958,6 +961,7 @@ register options:
 The folder is readable only by the user: every start sets its mode to 0700, except on Windows.
 
 The server keeps its action counter in the chat database, as custom data of the agent control chat; the approvals of all messages to a chat and of all files from it, and the chat's schedules, as custom data of that chat; and its actions and due scheduled prompts in memory.
+The server keeps its action counter in the chat database, as custom data of the agent control chat, the approvals of all messages to a chat and of all files from it, and copies off, as custom data of that chat, and its actions in memory.
 
 The server keeps no log file: it writes its log to the terminal where `serve` runs, events to stdout and errors to stderr. Each note of a status message is written to stdout, for example `Note to contact Alice (@4): Reading the file…`.
 
@@ -976,6 +980,7 @@ One server runs per data folder: a second one exits, because two processes on on
 - In such a chat, the status message and its notes are sent without asking and without a copy in the agent control chat; each note is written to the terminal. Everyone in the chat sees in the status line the names of the agent's running tools and of its model, the names of the files Claude Code reads and edits, without their folders, and the names of its other tools and subagent types, also for its work in other chats.
 - With the status hooks in scope `user`, Claude Code passes the events of every session of the user to curl, which posts them to the agent's server, with prompts, commands, file contents and tool results. The server uses only the fields named in [Status hooks](#status-hooks), keeps state only for the sessions that used the agent's tools, and logs nothing. curl ignores `.curlrc` files and proxy variables, so the events and the token are sent only to 127.0.0.1.
 - Only approvers schedule prompts, and a schedule's prompts become due only while the owner who added it is an approver. `receive` returns them in `scheduled`, apart from the chat's messages.
+- After `/approve #N all`, the agent sends to that chat without asking, files included; `/revoke #N` ends it. With `/copies #N off`, these messages are not copied to the agent control chat.
 - The server refuses to send private keys, its own files and the files under `~/.simplex-mcp`, where agents keep their data, except the files under `files/` of its own data folder; other files the agent can read are sent after approval.
 - The server refuses to send private keys, its own files, the secrets and the files under `~/.simplex-mcp`, where agents keep their data, except the files under `files/` of its own data folder; other files the agent can read are sent after approval.
 - With secrets, values are protected from accidental exposure to the model provider: the server deletes `/secret` messages for all members, and the agent gets the names, not the values. A prompt injection can make the agent send a value away by reference, for example in a command that reads the file of a secret into a request to another host; this is out of scope.
@@ -1152,7 +1157,7 @@ VERSION is the plugin's version, as in `npx -y @simplex-chat/mcp@0.3.0 link`. Th
 - A chat belongs to the session that connected it, even when the other side accepts after `connect` returned. The tools of other sessions don't show it. Their `connect` to its address returns `The chat of LINK belongs to another session; an admin or owner of that session's group can give it to this session with /give.` For example, `/give @3 2` in the group of the session that owns chat @3 gives it to session 2. The chat's [schedules](#scheduled-prompts) are moved with it, and their due prompts are dropped. A schedule's prompts become due only while the member who added it is an approver in the group of the session that owns the chat. Each group has its own member IDs, so the prompts of a schedule added in another session's group become due only after the chat is given back to that session.
 - The group has the commands of the agent control chat of `serve` (see [What the owner sees](#what-the-owner-sees)), without a session prefix, such as `/approve 7`, `/receive @3 9` and `/leave #2`. It also has `/give CHAT N`, `/observer #G ID`, and `/approve N all` and `/revoke TOOL` for tools, see [Tool use](#tool-use). `/secret`, `/unsecret` and `/secrets` get `Secrets are off: the server runs without --secrets-folder.`, and a one-line `/secret` of an admin or owner is deleted for all members first.
 - A chat belongs to the session that connected it, even when the other side accepts after `connect` returned. The tools of other sessions don't show it. Their `connect` to its address returns `The chat of LINK belongs to another session; an admin or owner of that session's group can give it to this session with /give.` For example, `/give @3 2` in the group of the session that owns chat @3 gives it to session 2.
-- `/list` and `/revoke` also work in the group of a closed session. A `/revoke` sent while the service is stopped applies when the service starts again.
+- All commands also work in the group of a closed session. A `/revoke` sent while the service is stopped applies when the service starts again.
 - `claude --resume` and `claude --continue` reopen a session with its group and chats. `/clear` keeps the session's group, because the service links the new session IDs of a Claude Code process to that process's session. A fork made with `claude --resume ID --fork-session` continues in the group of the resumed session. After `/resume` of another session inside a running one, prompts and answers go to the running session's group. A later `claude --resume` of that other session reopens its own group and chats.
 - A session closes 10 minutes after its Claude Code session ends, once the expiry times of its actions have passed. The service stops 10 minutes after the last session closes. The next session start or tool call starts it again.
 - A non-interactive run, `claude -p` or the Agent SDK, gets no session and no group. Its hooks post nothing, and its SimpleX tools return `This Claude Code run is not interactive, so it has no SimpleX group; the SimpleX tools work in interactive sessions.`
@@ -1216,7 +1221,7 @@ Owners set the group's preferences in the app, and SimpleX enforces them. Claude
   - For a card that waits for approval, or for `/forward` of a voice message: `Action N: ...`. The action then fails.
   - `reply` returns the same text without the prefix `Claude's answer was not posted: `.
 - After an action is decided, the text names the outcome and the card, and the action stays as it was:
-  - The card of an action performed in mode `host` or under a standing approval is posted after the action. When that post is refused, Claude posts `Action N was performed; its card was not posted: ...` or `Action N failed; its card was not posted: ...`.
+  - The card of an action performed in mode `host` or under a standing approval is posted after the action, except that of a done send under a standing approval to a chat with `/copies CHAT off`, see [Approval of all messages to a chat](#approval-of-all-messages-to-a-chat). When that post is refused, Claude posts `Action N was performed; its card was not posted: ...` or `Action N failed; its card was not posted: ...`.
   - When the edit of a card with its outcome is refused, Claude posts `Action N was performed; its card was not updated: ...`, with `failed`, `was rejected`, `expired` or `ended` in place of `was performed`.
   - A card posted or edited when the service stops gets `Action N: ...`.
 
