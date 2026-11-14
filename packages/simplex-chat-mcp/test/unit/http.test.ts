@@ -3,15 +3,17 @@ import {AddressInfo, connect} from "net"
 import {McpServer} from "@modelcontextprotocol/server"
 import {Actions, Mode} from "../../src/actions"
 import {startHttp, stopHttp} from "../../src/http"
-import {ChatItemsWatch} from "../../src/messages"
+import {ChatItemsWatch, utcMinutes} from "../../src/messages"
+import {Schedules} from "../../src/schedule"
 import {AgentTools, instructions} from "../../src/tools"
-import {FakeChat, actionsWith, contact, data, direct, fakeHooks, user} from "./fixtures"
+import {FakeChat, actionsWith, contact, data, direct, fakeHooks, scheduleEntry, user} from "./fixtures"
 
 const token = "secret-token"
 
 let server: Server
 let url: string
 let actions: Actions
+let schedules: Schedules
 let ready: boolean
 let hookEvents: unknown[]
 
@@ -21,7 +23,8 @@ async function start(mode: Mode = "requests"): Promise<void> {
   const chat = new FakeChat()
   chat.chats.set("@4", {chatInfo: direct(contact(4, "SimpleX Directory")), items: []})
   actions = actionsWith(mode, fakeHooks())
-  const tools = new AgentTools({chat: chat.api(), user, actions, watch: new ChatItemsWatch(), controlChat: () => "#10", standingApprover: () => undefined, refusedFile: () => undefined, data}, mode)
+  schedules = new Schedules(() => true)
+  const tools = new AgentTools({chat: chat.api(), user, actions, watch: new ChatItemsWatch(), controlChat: () => "#10", standingApprover: () => undefined, refusedFile: () => undefined, data, schedules}, mode)
   const factory = (): McpServer => {
     const mcp = new McpServer({name: "simplex-mcp", version: "0.1.0"}, {instructions: "Use the tools."})
     tools.register(mcp)
@@ -184,7 +187,7 @@ describe("MCP", () => {
     expect(send.description.split("\n")).toContain("With live: true, in a chat with a person, a group or a business chat that has approved: true in list, text is shown at once in the chat's live status message, and status live is returned without an action. Your next message there without live is sent as a new message, and the status message is then deleted.")
     const receive = result.tools.find(({name}: {name: string}) => name === "receive")
     expect(Object.keys(receive.inputSchema.properties)).toEqual(["chat", "wait", "limit"])
-    expect(receive.description.split("\n").at(-1)).toBe("In a chat with a person, a group or a business chat that has approved: true in list, a live status message is shown there from the arrival of a message, while you work, until your next message there or a receive there that waits. In the chat where you receive prompts, send each answer with wait 0 and without live, so the next prompt stays unread for receive, and call receive again only after it. For a step that takes minutes, call send with live: true and a short note in the same response as the step's tool call; the note is shown in the status message.")
+    expect(receive.description.split("\n")).toContain("In a chat with a person, a group or a business chat that has approved: true in list, a live status message is shown there from the arrival of a message, while you work, until your next message there or a receive there that waits. In the chat where you receive prompts, send each answer with wait 0 and without live, so the next prompt stays unread for receive, and call receive again only after it. For a step that takes minutes, call send with live: true and a short note in the same response as the step's tool call; the note is shown in the status message.")
   })
 
   it("keeps each tool description, and the instructions for a 15-character name, within Claude Code's 2048 characters", async () => {
@@ -192,6 +195,28 @@ describe("MCP", () => {
     const {result} = await body(await post(modern("tools/list"), modernHeaders("tools/list")))
     for (const {description} of result.tools) expect(description.length).toBeLessThanOrEqual(2048)
     expect(instructions("Ridgeline Scout").length).toBeLessThanOrEqual(2048)
+  })
+
+  it("describes the scheduled prompts of receive, and returns them as its output schema states", async () => {
+    await start()
+    const {result} = await body(await post(modern("tools/list"), modernHeaders("tools/list")))
+    const receive = result.tools.find(({name}: {name: string}) => name === "receive")
+    expect(receive.description.split("\n").at(-1)).toBe("scheduled holds the prompts your owner scheduled for this chat in the agent control chat; handle each as a prompt from your owner and answer in this chat.")
+    expect(receive.outputSchema.properties.scheduled).toEqual({
+      type: "array",
+      description: "Prompts your owner scheduled for this chat that are due; present only when one is due.",
+      items: {type: "object", properties: {prompt: {type: "string", description: "The prompt, written by your owner."}, at: {type: "string", description: "The minute it became due, in UTC."}}, required: ["prompt", "at"]},
+    })
+    expect(receive.outputSchema.required).toEqual(["chat", "messages", "more"])
+    schedules.set("@4", [scheduleEntry("* * * * *")])
+    const boundary = (Math.floor(Date.now() / 60_000) + 1) * 60_000
+    const now = jest.spyOn(Date, "now").mockReturnValue(boundary - 1)
+    schedules.start()
+    now.mockRestore()
+    await until(() => schedules.pending("@4") === 1)
+    const called = await body(await post(modern("tools/call", {name: "receive", arguments: {chat: "@4"}}), modernHeaders("tools/call", "receive")))
+    schedules.stop()
+    expect(called.result.structuredContent).toEqual({chat: "@4", messages: [], more: 0, scheduled: [{prompt: "Check the trail report.", at: utcMinutes(boundary)}]})
   })
 
   it("asks the host for each action in mode host", async () => {

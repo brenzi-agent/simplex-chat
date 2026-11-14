@@ -1,6 +1,6 @@
 # SimpleX MCP server 0.3: plan
 
-Status: draft · 2026-10-17, files and leave 2026-10-30 (`plans/2026-10-30-mcp-files-and-leave.md`), live status 2026-11-10 (`plans/2026-11-10-mcp-live-status.md`), Claude Code activity 2026-11-11 and the status at the arrival of a message 2026-11-12 (`plans/2026-11-11-mcp-live-activity.md`) · person-facing manual: `REFERENCE.md`, the plugin in short in `README.md`. Code references: master `139ce5f8c` (`/code/simplex-chat-6`), unless marked `9711dcfc9` (core 7.1.0.11); in the sections of the status message and the inference endpoint, master `f8776692df`; hook events: the Claude Code hooks reference (code.claude.com/docs/en/hooks.md) of 2026-11-11; `simplex-chat` 7.1.0-beta.10.2 loads core 7.1.0.20. Pending decisions: section Open.
+Status: draft · 2026-10-17, files and leave 2026-10-30 (`plans/2026-10-30-mcp-files-and-leave.md`), live status 2026-11-10 (`plans/2026-11-10-mcp-live-status.md`), Claude Code activity 2026-11-11 and the status at the arrival of a message 2026-11-12 (`plans/2026-11-11-mcp-live-activity.md`), scheduled prompts 2026-11-11 (`plans/2026-11-11-mcp-schedule.md`) · person-facing manual: `REFERENCE.md`, the plugin in short in `README.md`. Code references: master `139ce5f8c` (`/code/simplex-chat-6`), unless marked `9711dcfc9` (core 7.1.0.11); in the sections of the status message and the inference endpoint, master `f8776692df`; hook events: the Claude Code hooks reference (code.claude.com/docs/en/hooks.md) of 2026-11-11; `simplex-chat` 7.1.0-beta.10.2 loads core 7.1.0.20. Pending decisions: section Open.
 
 ## Scope
 
@@ -11,6 +11,7 @@ In:
 - the agent control chat: the owner approves the agent's connects, sends, downloads and leaves there, or all sends to one chat, or all downloads from one chat;
 - six tools: `connect`, `send`, `receive`, `download`, `list`, `leave`;
 - files: the `file` field of received messages, `download` to save one in the data folder, `send` with `file` to send one;
+- scheduled prompts: an approver schedules a prompt for a chat in the agent control chat, with cron times; `receive` of that chat returns it when due;
 - connections to contact addresses, one-time links, groups, channels and SimpleX names, as the agent's profile or incognito;
 - bots as services: the commands a bot advertises are returned by `connect`;
 - a status message while the agent works, in a chat whose messages the owner approved with `/approve CHAT all`: the agent's state, its notes, the state of a model behind llama-swap or llama-server, and the permission prompts, compaction, running tools and subagents of the agent's Claude Code sessions, reported by status hooks.
@@ -57,6 +58,8 @@ agent name       NAME                 person, serve                       person
 display name     DISPLAY              person, --display-name, else NAME   owner, peers      the agent's profile; the agent control chat's name
 action           N                    server: counter in the custom data  owner, agent      /approve [CHAT] N, /reject [CHAT] N, /receive [CHAT] N, /forward [CHAT] N; tool results; list
                                       of the agent control chat
+schedule         N                    server: position in the chat's      owner             /unschedule CHAT N; /schedules; log lines
+                                      schedules
 chat             @N contact, #N group SimpleX core                        agent, owner      tool inputs and results; CHAT in commands and cards
 item             N                    SimpleX core                        agent             reply_to; download; messages
 member           N (groupMemberId)    SimpleX core                        agent             from_member; mention
@@ -74,6 +77,8 @@ link                     rule
 owner command -> action  /approve [CHAT] N or /reject [CHAT] N from an approver, action N pending in memory, CHAT its chat when given; otherwise a reply
 chat -> approval         the chat's custom data {simplexMcp: {approvedBy, approvedById, approvedAt}}, in mode requests, while member approvedById is an approver
 chat -> files approval   the chat's custom data {simplexMcpFiles: {approvedBy, approvedById, approvedAt}}, as the approval
+chat -> schedules        the chat's custom data {simplexMcpSchedules: [{cron, prompt, by, byId, at}]}; an entry applies while member byId is an approver and the control chat is not lost
+schedule -> receive      the entry's due prompt, one per entry, in memory until a receive of the chat returns it
 download -> file         the file ID of the item: one download per file ID in memory, settled by the file's events
 action -> card           actions[N].card: the card's item ID in the agent control chat
 tool call -> action      same tool and action fields, action in memory: the call attaches; otherwise a new action
@@ -146,6 +151,7 @@ status.ts     status messages: schedule, labels, notes, deletion
 inference.ts  polls of llama-swap or llama-server: model state, tokens read, tokens per second
 activity.ts   Claude Code hook events: agent sessions, running tools, subagents, permission prompts, compaction
 messages.ts   message items, waits, responses
+schedule.ts   scheduled prompts: cron matching, the minute timer, due prompts
 http.ts       listener, token, /mcp, /hook, the SDK handler with its Origin and Host checks
 files.ts      token, headers.json, hook-headers, server.json, lock
 register.ts   register command: the MCP entry and the status hooks
@@ -192,6 +198,8 @@ item          where
 nextAction    custom data of the agent control chat: {simplexMcp: {control: true, nextAction: N}}
 approval      custom data of the contact or group: {simplexMcp: {approvedBy, approvedById, approvedAt}}; deleted with the chat
 files approval custom data of the contact or group: {simplexMcpFiles: {approvedBy, approvedById, approvedAt}}; deleted with the chat
+schedules     custom data of the contact or group: {simplexMcpSchedules: [{cron, prompt, by, byId, at}]}; deleted with the chat
+due prompts   memory: one per schedule, until a receive of its chat returns it
 actions       memory: they end with the process
 open calls    memory
 downloads     memory: one per file ID, until the file is received or fails
@@ -338,6 +346,9 @@ action decided                  Action 2 rejected by Alice. | Action 2 expired.
 mode host                       Action 2: performed without approval (mode host). | ...; failed: <error>.
 counter or card not written     Action 2: failed: <error>.
 owner's /leave CHAT             Left business Ridgeline (#9), requested by Alice. | Deleted bot SimpleX Directory (@4), requested by Alice.
+owner's /schedule               Schedule 1 of #3 added by Alice: 0 7 * * 1-5.
+owner's /unschedule             Schedule 1 of #3 removed by Alice.
+scheduled prompt due            Scheduled prompt 1 of #3 is due.
 owner added, --owners LIST      Bob (member 7) is now an owner and can't approve actions yet. Restart the server with --owners 3:Alice,7:Bob
 owner gone, --owners LIST       Alice (member 3) is no longer an owner. Restart the server with --owners 7:Bob   (the human owners remaining)
 no human owner remains          Alice (member 3) is no longer an owner. No owners remain: restart the server with --reset-owners --owners
@@ -489,13 +500,15 @@ host, interrupted   the request's lines except the commands line + "Performed wi
 
 ### Commands
 
-The group's command menu has `/pending`, `/list` and `/leave`; the cards carry the others.
+The group's command menu has `/pending`, `/list`, `/schedules`, `/leave` and `/help`; the cards show the others, except the schedule commands (section Schedules).
 
 ```
 menu entry   keyword   label                 params      tapped
 /pending     pending   Pending actions       none        sent
 /list        list      Chats and approvals   none        sent
+/schedules   schedules Scheduled prompts     none        sent
 /leave       leave     Leave a chat          <chat ID>   "/leave <chat ID>" in the entry field, the cursor at its end
+/help        help      Help                  none        sent
 ```
 
 - The apps put "/keyword params" into the entry field for a command with params, and send "/keyword" for one without (`CommandsMenuView.kt:154-159`, `CommandsMenuView.swift:118-124`).
@@ -515,6 +528,12 @@ command             result
 /delete CHAT files  the running downloads of CHAT failed and cancelled, also those the core continues after a restart, then the folder of CHAT deleted, for a current or a left chat
 /pending            one line per pending action: "2  send to bot SimpleX Directory  expires 2026-10-18 09:15 UTC"; "No pending actions." when none
 /list               one line per chat of the agent, as list returns them: the 100 most recent chats, each line cut to 100 bytes as encoded in the message, "…" included; then "K older chats are not shown." ("1 older chat is not shown.") when more exist
+/schedule CHAT CRON a schedule of CHAT by the sender: PROMPT is made due at each local minute matched by CRON, and the server returns it in the next receive of CHAT (section Schedules)
+  PROMPT
+/unschedule CHAT N  schedule N of CHAT is removed; the later ones are renumbered
+/schedules          one line per schedule, for the chats in the order of /list, then by N: "#3  1  0 7 * * 1-5  Post the trail report."; the prompt on one line; each line cut to 100 bytes as /list lines; the first 100 lines, then "K more schedules are not shown." ("1 more schedule is not shown.") when more exist
+/help               one line per command of the commands reply, in its order: its forms and its effect; from any sender
+/help COMMAND       how to use COMMAND, a keyword of the commands reply, written with or without "/": its forms and, where they apply, its parameters, rules, limits, an example and related commands; one text per group: {approve, reject}, {receive, forward}, {schedule, unschedule, schedules}; from any sender
 ```
 
 `/list`:
@@ -530,7 +549,7 @@ Replies:
 
 ```
 situation                                   reply
-sender is not an approver                   Only owners approve actions. (--owners: Only the owners listed in --owners approve actions.)
+sender is not an approver, other than /help Only owners approve actions. (--owners: Only the owners listed in --owners approve actions.)
 N unknown, decided or from an earlier run   Action 9 is not pending.
 CHAT not the action's chat                  Action 10 is not for #3.
 /approve CHAT all                           Approved for business Ridgeline (#9) by Alice. /'revoke #9'
@@ -554,7 +573,26 @@ of the file fails
 /delete CHAT files                          Deleted 3 files from #9, 2.1 MB. ("1 file")
 /delete CHAT files, no files                No files from #9.
 /list, no chats                             No chats.
-other one-line text starting with "/"       Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list. Each card shows its commands.
+/schedule CHAT CRON PROMPT                  Schedule 1 of group Builders (#3): 0 7 * * 1-5, server time UTC+01:00. /'unschedule #3 1'
+/schedule | /unschedule, CHAT not the       No chat #13. /list shows the agent's chats.
+agent's
+/schedule, a word of CRON not of the forms  Schedule: 5 cron fields expected, such as 0 7 * * *.
+/schedule, a field out of range             Schedule: cron field 8 is out of range.   (the field as typed)
+/schedule, PROMPT over 2000 characters      Schedule: the prompt is over 2000 characters.
+/schedule, CHAT with 10 schedules           Schedule: group Builders (#3) has 10 schedules; /'unschedule #3 N' removes one.
+/unschedule CHAT N                          Schedule 2 of group Builders (#3) is removed.
+/unschedule CHAT N, no schedule N           #3 has no schedule 4.
+/schedules, no schedules                    No schedules.
+/help                                       /'approve N' or /'approve CHAT N' performs pending action N, other than a download; /'approve CHAT all' approves all sends to CHAT.
+                                            ... one line per command ...
+                                            /'help COMMAND' shows how to use COMMAND, such as /'help schedule'.
+/help COMMAND, COMMAND a keyword of the     its help text, such as for /help revoke:
+commands reply                              /'revoke CHAT' ends the approval of all sends to CHAT given with /'approve CHAT all': each later send to CHAT needs approval again.
+                                            /'receive CHAT off' ends the approval of all files from CHAT in the same way.
+                                            Example: `/revoke #3`. Related: /list, /'help approve'.
+/help COMMAND, COMMAND not a keyword of     No help for that. /help lists the commands.
+the commands reply
+other one-line text starting with "/"       Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /schedule, /unschedule, /schedules, /help. Each card shows its commands.
 ```
 
 After `/leave CHAT`, after its reply, and after the outcome of a leave action in state done, when the folder of CHAT has files:
@@ -570,6 +608,44 @@ Files from business Ridgeline (#9) are kept in `/home/alice/.simplex-mcp/my-agen
 - A files approval covers downloads only, and ends as a standing approval does.
 - `/leave CHAT` applies in both modes. Its reply is logged, with names on one line.
 - A standing approval covers sends only. It ends at `/revoke`, when the chat is deleted, or when member `approvedById` is no longer an approver. It applies in mode `requests` only: in mode `host`, `list` and `/list` show no approvals, and `/approve CHAT all` stores none.
+
+### Schedules
+
+With `/schedule #3 0 7 * * 1-5 Post the trail report.` an approver schedules the prompt for 07:00 server time on weekdays; the server returns it to the agent in `scheduled` of `receive` of `#3` (section receive).
+
+```
+part     rule
+CHAT     a chat of the agent; the agent control chat is refused
+CRON     the 5 words after CHAT, joined by single spaces
+PROMPT   the rest of the line, its outer whitespace trimmed; 1 to 2000 characters (code points)
+```
+
+```
+field          range
+minute         0-59
+hour           0-23
+day of month   1-31
+month          1-12
+day of week    0-7; 0 and 7 are Sunday
+```
+
+```
+item     values
+*        the field's range
+N        N
+A-B      A to B
+*/S      every S-th value of the range, from its start
+A-B/S    every S-th value from A to B
+```
+
+- A field is an item or a comma list of items, numbers only. Out of range: a value outside the field's range, A above B, or S equal to 0.
+- Day of month and day of week: when neither field starts with `*`, a day matched by one of them suffices, as in vixie cron; otherwise a day is matched by both.
+- Times are the local time of the server process, in the time zone of TZ, otherwise of the system; the reply to `/schedule` names the UTC offset at that moment. A local minute skipped by a daylight saving change is not matched; a repeated one is matched twice.
+- At each minute boundary, the server makes due the prompt of each schedule that applies and whose CRON is matched by the local time. A schedule applies while member `byId` is an approver and the control chat is not lost. Every schedule is listed by `/schedules`, also one that does not apply.
+- One prompt per schedule stays due, with the minute it was made due, until a `receive` of the chat returns it. Due prompts are kept in memory: they are dropped at a restart, and the minutes while the server is stopped are skipped.
+- A chat has at most 10 schedules. N is the position in the chat's list: `/unschedule` renumbers the later ones, and their due prompts are kept.
+- Schedules are stored in the chat's custom data, its other keys kept, and are deleted with the chat by `leave` and `/leave`. Entries of another form, or with a CRON that is not valid, are left out, and dropped at the next write of the chat's schedules.
+- The schedule commands apply in both modes. `/schedule` and `/unschedule` are logged, with names on one line.
 
 ### Membership messages
 
@@ -741,7 +817,7 @@ Chat references are @N for contacts and #N for groups and channels.
 
 ### Calls
 
-- A call waits inside the server: for the approver's decision, when its action is pending; then for its condition (`connect`: the connection; `send`: responses; `receive`: a new message).
+- A call waits inside the server: for the approver's decision, when its action is pending; then for its condition (`connect`: the connection; `send`: responses; `receive`: a new message or a due prompt of the chat).
 - When the request carries a progress token, the server sends a progress notification at once and then every 60 seconds; Claude Code shows the latest one in the task's entry.
 - A call that ends without its result leaves its action unchanged; the same call again attaches to it. Messages are marked read only when the handler returns without an abort.
 - Errors the model can correct, schema violations included, return `isError: true` and a message. Errors after approval are results with `status: "failed"` and `error`.
@@ -872,7 +948,7 @@ other              file      none                                               
 ```
 input field   type     rule
 chat          string   required; a chat of the agent
-wait          number   optional; seconds to wait when no message is new; 0 to 86400; default 0
+wait          number   optional; seconds to wait when no message is new and no prompt of the chat is due; 0 to 86400; default 0
 limit         number   optional; 1 to 100; default 50
 ```
 
@@ -881,12 +957,14 @@ result field  type        present
 chat          string      always
 messages      Message[]   always; the new messages, up to limit: the unread ones in chat order, then those that arrive during the call
 more          number      always; new messages not returned
+scheduled     array       a prompt of the chat is due; {prompt, at} of each due prompt, in the order of the chat's schedules; at: the minute it was made due, as 2026-11-11 06:00 UTC
 ```
 
 - New: a received message that is unread when the call reads its page, or that arrives during the call. The returned ones are marked read; another call marking one read after this call collected it does not remove it.
 - When a call waits, with `wait` above 0 and nothing new, the chat's status message is deleted first. When messages are returned, the chat's status message is started (section What the owner sees: the status message).
 - In an eligible chat without a status message, a waiting status is started at each received message (section Status message).
 - In the description, the agent is asked to call `send` with `live: true` and a short note in the same response as the tool call of a step that takes minutes.
+- Due prompts (section Schedules) are taken after the messages are marked read, so a call that ends without a result leaves them due; each is returned once.
 
 ### list
 
@@ -1098,18 +1176,21 @@ serve(NAME, options):
   group.membership not owner, or memberStatus not creator, connected or complete: lost = true; log "The agent lost its control chat. Restart the server with --reset-owners."
   lost unset, group.groupProfile.displayName differs from the profile's, or its commands from the menu of createControlChat: /_group_profile #group {the group profile with that displayName and menu}   # APIUpdateGroupProfile, parser Commands.hs:6534
   members = /_members #group, so approvers are known before the first call
+  lost unset: schedules = the valid entries of simplexMcpSchedules in the custom data of each chat of list(), in one /_get chats read
   each chat of list() that meets the conditions of status messages: deleteLeftovers(chat), awaited (section Status message); a failed chat list: logged "status messages: <error>"
   HTTP listen 127.0.0.1:PORT; port in use: chat.close(); remove DIR/lock; exit 1 "Port PORT is in use. Start with --port N."   # before any link or QR code is printed
     requests to /mcp with the token get 503 with Retry-After: 1 until ownerStart ends
     POST /hook with the token: Activity.record of the event, from the listen on (section Claude Code activity)
   write DIR/server.json {name: NAME, port, expireHours}
   lost unset: ownerStart(group)
+  start the schedule timer at the next minute boundary (section Schedules)
   log "Listening on http://127.0.0.1:PORT/mcp"
   every 60 s, and at each owner command: expire the pending actions whose expires has passed (wall clock, so a sleep of the computer delays no expiry);
     delete from memory the decided actions (done, failed, rejected, expired) with open 0 whose expires has passed, and stop their collections
   drain buffered events
 
 SIGINT, SIGTERM (process.on; a second signal ends the wait for the cards at once):
+  stop the schedule timer
   stopping = true: new actions get the tool error "The server is stopping."; a host-mode action whose card is still being posted is cancelled, not performed
   close HTTP (open calls end); stop handling events, so no /approve starts a perform
   wait for the cards being posted
@@ -1134,7 +1215,9 @@ g = /_group <user> {displayName: DISPLAY, fullName: "",
   groupPreferences: {history: {enable: "on"}, commands: [
     {type: "command", keyword: "pending", label: "Pending actions"},
     {type: "command", keyword: "list", label: "Chats and approvals"},
-    {type: "command", keyword: "leave", label: "Leave a chat", params: "<chat ID>"}]}}
+    {type: "command", keyword: "schedules", label: "Scheduled prompts"},
+    {type: "command", keyword: "leave", label: "Leave a chat", params: "<chat ID>"},
+    {type: "command", keyword: "help", label: "Help"}]}}
 /_set custom #g {simplexMcp: {control: true, nextAction: n}}
 log "Agent control chat \"DISPLAY\" created."
 return g with customData {simplexMcp: {control: true, nextAction: n}}       # the /_group response precedes the custom data
@@ -1191,7 +1274,9 @@ newChatItems, groupRcv, main scope       text starts with "/"                   
 
 ```
 command = parseCommand(text)                      # steward src/commands.ts; undefined: ignore
-not one of the commands below: reply "Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list. Each card shows its commands."
+not one of the commands below: reply "Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /schedule, /unschedule, /schedules, /help. Each card shows its commands."
+help TOPIC:       TOPIC = PARAMS without a leading "/" followed by a character other than a line break; reply the help text of TOPIC: the commands for "", how to use a command for its keyword,
+                  otherwise "No help for that. /help lists the commands."
 sender not an approver: reply "Only owners approve actions." (--owners: "Only the owners listed in --owners approve actions.")
 approve | reject | receive | forward [CHAT] N, receive CHAT N all, action N not pending in memory, or its card unset: reply "Action N is not pending."
 the same with CHAT, action N a connect or for another chat: reply "Action N is not for CHAT."
@@ -1217,6 +1302,16 @@ delete CHAT files: each download of CHAT in memory: rejected, "Your owner delete
 pending:          reply with the pending actions
 list:             reply with one line per chat of list(), the 100 most recent: CHAT, the type and name, ", approved for this chat by NAME" and ", files approved by NAME" while each approval applies, ", not connected";
                   each line cut to 100 encoded bytes with "…"; then "K older chats are not shown." when more exist (worst case about 10.3 KB, below the 15602-byte message)
+schedule CHAT CRON PROMPT: CRON the 5 words after CHAT, joined by single spaces; PROMPT the rest of the line
+                  CHAT not a chat of the agent: reply "No chat CHAT. ..."; CRON not valid: reply its error; PROMPT over 2000 code points: reply "Schedule: the prompt is over 2000 characters.";
+                  10 valid entries: reply "Schedule: ... has 10 schedules; /'unschedule CHAT N' removes one."
+                  otherwise entries = the valid entries + {cron, prompt, by: sender name, byId: sender groupMemberId, at: now}; set the chat's custom data simplexMcpSchedules = entries, keeping its other keys;
+                  the chat's entries in memory replaced, the due prompts of the kept entries kept by at; log "Schedule N of CHAT added by NAME: CRON."; reply "Schedule N of ... (CHAT): CRON, server time UTC±HH:MM. /'unschedule CHAT N'"
+unschedule CHAT N: CHAT not a chat of the agent: reply "No chat CHAT. ..."; N not from 1 to the count of valid entries: reply "CHAT has no schedule N."
+                  otherwise set simplexMcpSchedules = the valid entries without entry N, keeping the other keys; the chat's entries in memory replaced as above;
+                  log "Schedule N of CHAT removed by NAME."; reply "Schedule N of ... (CHAT) is removed."
+schedules:        reply with one line per valid entry of each chat of list(), in its order: CHAT, N, CRON and the prompt on one line, joined by two spaces; each line cut to 100 encoded bytes with "…";
+                  the first 100 lines, then "K more schedules are not shown." when more exist; "No schedules." when none
 ```
 
 - Owner commands run one at a time, in arrival order: a command awaits the custom data write of the one before it.
@@ -1566,18 +1661,19 @@ of progress                                 (an XFTP file returns to rcvInvitati
 ```
 receive(input, ctx):
   chat is the agent control chat: tool error "unknown chat"
-  from now, each newChatItems of chat adds its received message items to arrived
+  from now, each newChatItems of chat adds its received message items to arrived, and the call is woken when a prompt of chat is made due
   s = /_get chat <chat> initial=1; a store error: tool error "unknown chat"
   s.chatStats.unreadCount > 0: pages = /_get chat <chat> around=<s.chatStats.minUnreadItemId> count=0 (that item alone),
     then /_get chat <chat> after=<the last item ID> count=100, repeated while the last after= page holds 100 and pages hold fewer than limit + 1 rcvNew message items that are not live
   unread = the rcvNew message items of pages; skipped = the rcvNew items of other content in pages (ciRequiresAttention, CIContent.hs:215-250)
   new = unread, then the items of arrived not in unread
-  none new and wait > 0: end(chat) of the status messages, not awaited; wait for newChatItems of chat until one is new | wait | signal
+  none new, no prompt of chat due, and wait > 0: end(chat) of the status messages, not awaited; wait for newChatItems of chat until one is new | a prompt of chat is due | wait | signal
     progress at once and every 60 s: "No new messages in <chat>; waiting until <time>."
   messages: new, up to limit; more = the rest + s.chatStats.unreadCount - the rcvNew items of pages (the unread items not read, at least 0)
   not aborted: /_read chat items <chat> <the IDs of messages and of skipped, joined by ",">, when that list is non-empty
   not aborted, messages not empty and showsStatus by the chat read of the call: start(chat) of the status messages (section Status message)
-  result {chat, messages, more}
+  not aborted: scheduled = the due prompts of chat, taken
+  result {chat, messages, more, scheduled when not empty}
 
 list():
   /_get chats <user> pcc=off count=1000000   # parser Commands.hs:6342; count= is ORDER BY chat_ts DESC LIMIT without a time boundary, Store/Messages.hs:884, :995
@@ -1989,6 +2085,28 @@ sequenceDiagram
   S->>A: {action: 12, status: done, chat: "#9"}
 ```
 
+### Scheduled prompt
+
+```mermaid
+sequenceDiagram
+  participant A as Agent
+  participant S as Server
+  participant O as Owner
+  participant G as Group #15
+  O->>S: /schedule #15 0 7 * * 1-5 Post the trail report.
+  S->>S: /_set custom #15 {simplexMcpSchedules: [{cron: "0 7 * * 1-5", prompt: "Post the trail report.", by: "Alice", byId: 3, at}]}
+  S->>O: "Schedule 1 of group ... (#15): 0 7 * * 1-5, server time UTC+01:00. /unschedule #15 1"
+  A->>S: receive {chat: "#15", wait: 3600}
+  Note over S: Wednesday 2026-11-11, 07:00 server time: schedule 1 matched
+  S->>A: {chat: "#15", messages: [], more: 0, scheduled: [{prompt: "Post the trail report.", at: "2026-11-11 06:00 UTC"}]}
+  A->>S: send {chat: "#15", text: "Trail report: ..."}
+  S->>O: send card, as for any send
+  O->>S: /approve #15 13
+  S->>G: item 60
+  S->>A: {action: 13, status: done, chat: "#15", item: 60, responses: [...]}
+  A->>S: receive {chat: "#15", wait: 3600}
+```
+
 ### Other scenarios
 
 ```
@@ -2025,14 +2143,15 @@ Unit:
 ```
 test        covers
 options     defaults, ranges, --stop-wait from 0 to 60, NAME, --display-name at the first and a later start, --owners with and without a list, names with commas, rejected arguments, --help text; --inference without trailing slashes, query and hash, its usage errors, and refused with --approve host
-commands    /approve [CHAT] N, /reject [CHAT] N, another chat, /approve CHAT all, /revoke, /pending, /list, unknown, multi-line, non-command text, a number from an earlier run; /list of 100 chats with cut lines and the older count; chat references over 15 digits; names with line breaks and escape sequences; a listed owner by the name on one line; the restart command as code; card size at 15000 bytes, with the current approvers' longest name; a connect refused for its message, its link texts cut to fit; mode host without approvals, /approve CHAT all refused; the wait at stop with cancelled cards, skipped without them, and ended by a second signal; the wait at stop for status deletions alone and with cancelled cards; SIMPLEX_MCP_INFERENCE_KEY with a line break, a space or a non-ASCII character refused with exit code 2 before the data folder exists; /receive CHAT N all and /receive CHAT off beside the approval of messages; /approve of a download and /receive or /forward of other actions refused; /forward with its reply and failure, the file outside the chat's folder; download cards with the preview, resized to fit 15000 bytes; a refused file posted and logged; an image send card with its preview
+commands    /approve [CHAT] N, /reject [CHAT] N, another chat, /approve CHAT all, /revoke, /pending, /list, unknown, multi-line, non-command text, a number from an earlier run; /list of 100 chats with cut lines and the older count; chat references over 15 digits; names with line breaks and escape sequences; a listed owner by the name on one line; the restart command as code; card size at 15000 bytes, with the current approvers' longest name; a connect refused for its message, its link texts cut to fit; mode host without approvals, /approve CHAT all refused; the wait at stop with cancelled cards, skipped without them, and ended by a second signal; the wait at stop for status deletions alone and with cancelled cards; SIMPLEX_MCP_INFERENCE_KEY with a line break, a space or a non-ASCII character refused with exit code 2 before the data folder exists; /receive CHAT N all and /receive CHAT off beside the approval of messages; /approve of a download and /receive or /forward of other actions refused; /forward with its reply and failure, the file outside the chat's folder; download cards with the preview, resized to fit 15000 bytes; a refused file posted and logged; an image send card with its preview; /schedule, /unschedule and /schedules: replies, every refusal, renumbering, the due prompt of a removed schedule dropped, the first 100 lines and the count of the others, other custom data and approvals kept, log lines with names on one line, mode host, the load at start, a lost control chat, the schedules of a chat left by /leave; /help to every member: the list in the order of the commands reply, the text of each command with and without "/", none of them the list, shared texts, the text of /schedule, unknown topics
 actions     every transition; attach rule; open counts; counter written before the card; a failed counter write or card post logged; stop edits pending and performing cards, aborts the performs' signal, and an interrupted perform logs no line; standing approval: performed at once, outcome card posted; 20 pending; 20 performing; decided actions deleted after expires
 cards       every card form and outcome; quoting; names and errors on one line; "as myself" and "incognito"; "where I am incognito"; leave forms; standing form; link texts cut to the bytes left; the reply quote cut by characters; download forms with sizes and the servers line; the attaching line of sends
-messages    message fields; responses with idle and wait; overflow IDs removed at deletion; receive with new messages under a concurrent call, stopping at limit + 1, a store error of a page read as its error; leave of @N and #N, pending membership included; approved in list; all chats in one read; an approval whose approver is no longer one; a group-role failure; a send to an unconnected contact or group refused; reply_to of an item other than a message refused; mentions of equal names refused; the connect wait cap; the connect wait ended by the stop; the file field of each file status and rejected, a forwarded file offered and then received; download: attach, performing at wait, a received file, a forwarded file kept outside the chat's folder and moved there at the approval, failures by events, a files approval, the wait for the file description and its end at wait, unknown servers without passwords and of disabled operators; send with file: the type and preview by extension, the resized copy deleted at sndFileCompleteXFTP and after a failed send, the fixed preview when the core can't resize or ffmpeg is absent, ffmpeg and ffprobe output, refused paths with symbolic links, a file changed after the request; receive: a status in approved direct chats with people, groups and business chats, and none for an aborted call, without messages, without the approval, with a bot or an agent, a disconnected contact, a channel, an observer role, a lost control chat or mode host; the status deleted when a receive of its chat waits, after the answer is sent, before leave, at the next tick after /revoke and after the control chat is lost, and kept when the answer fails; in an approved chat, one waiting status for the messages received before a receive, "thinking" at once when a receive returns them, and the waiting status of responses taken by their send; none, and no chat read, for an own or live message, a member support chat, a chat without the approval, or a chat with a bot; send with live: the note under the line and its log line, a pending send with the same text left unattached, an aborted call, the refusals; a call counted as running until it ends, also when it throws; leftovers read only in eligible chats
+messages    message fields; responses with idle and wait; overflow IDs removed at deletion; receive with new messages under a concurrent call, stopping at limit + 1, a store error of a page read as its error; leave of @N and #N, pending membership included; approved in list; all chats in one read; an approval whose approver is no longer one; a group-role failure; a send to an unconnected contact or group refused; reply_to of an item other than a message refused; mentions of equal names refused; the connect wait cap; the connect wait ended by the stop; the file field of each file status and rejected, a forwarded file offered and then received; download: attach, performing at wait, a received file, a forwarded file kept outside the chat's folder and moved there at the approval, failures by events, a files approval, the wait for the file description and its end at wait, unknown servers without passwords and of disabled operators; send with file: the type and preview by extension, the resized copy deleted at sndFileCompleteXFTP and after a failed send, the fixed preview when the core can't resize or ffmpeg is absent, ffmpeg and ffprobe output, refused paths with symbolic links, a file changed after the request; receive: a status in approved direct chats with people, groups and business chats, and none for an aborted call, without messages, without the approval, with a bot or an agent, a disconnected contact, a channel, an observer role, a lost control chat or mode host; the status deleted when a receive of its chat waits, after the answer is sent, before leave, at the next tick after /revoke and after the control chat is lost, and kept when the answer fails; in an approved chat, one waiting status for the messages received before a receive, "thinking" at once when a receive returns them, and the waiting status of responses taken by their send; none, and no chat read, for an own or live message, a member support chat, a chat without the approval, or a chat with a bot; send with live: the note under the line and its log line, a pending send with the same text left unattached, an aborted call, the refusals; a call counted as running until it ends, also when it throws; leftovers read only in eligible chats; receive with due prompts: scheduled once, with wait 0 and at once with wait, a waiting call ended by a due prompt, the prompts of other chats left due, an aborted call leaving them due
 status      the post after the first read of the conditions; gaps of 3 s, then a tenth of the age up to 20 s; frames and elapsed time; the frozen line at render 50, then checks every 5 min; label ranks; the model and the counts in labels; deletion when the conditions are unmet or their read fails, at 23 h, and 30 min after the last call in the frozen phase; a note under the line and under the frozen line, refused at render 59; a status 23 h old replaced at a note; no tick render after a label read during which notes reached render 50; one status per chat; a queued status: one per chat, the waiting label at its ticks, "thinking" at once when it is started, the labels of the work after it; a queued status started before its first post, posted as "thinking"; the frozen line of a waiting status, and the frozen working line when it is started later; no queued status after the stop; nothing sent after a tick of an ended status; a failed command; stop; the logging of failed polls; leftovers page by page; the Claude Code rows ranked among the labels; Claude Code tools by kind, with the file base name or the tool name in a code span, or the second form; at the end of the turns of the agent sessions, the statuses other than waiting ones deleted, none while a session runs a turn or a call runs
 inference   loading from /running; /props, then /slots, at up to 4 distinct allowed proxies, without the key; tokens/s between two polls, summed; tokens read; idle; fractional and negative counts ignored; the first 64 slots; the model of one busy model; a sleeping server; 503 of /props and /slots; a plain llama-server with the key; proxies on URL's host or loopback only; one poll per 3 s; failures by HTTP status, invalid JSON, a body over 1 MiB, a redirect, a refused connection and the 1 s deadline, folded to one line; a failing proxy left out; the model ID pattern; GET of /running, /props and /slots only
 activity    agent sessions from the first event with a tool of this server, other sessions and the servers of other agents ignored; the latest running tool, this server's tools and Agent left out; the tools of one session and agent dropped at its PostToolBatch; a PreToolUse after its end event ignored; the permission prompt until a tool of its session ends, fails or is denied, a batch ends or the turn stops; compaction until PostCompact or a PreToolUse of the main agent; the latest subagent until its SubagentStop; a session cleared at UserPromptSubmit, Stop, StopFailure and SessionEnd; turnsEnded at each end event after which no agent session runs a turn, and not for an end event of a tool after Stop; the idle notification as Stop, other notifications ignored; 16 sessions; 64 tools, 64 subagents, 256 ended IDs; the patterns of file base names, tool names and agent types; bodies that are not objects, and fields of other types
-http        401 without token; 403 with another Origin; 404 for other paths and for a request target that is not a URL, the server serving on; 503 with Retry-After until ready; SDK validation errors; the live schema, the receive input fields, status live and the required status of send's output; each description, and the instructions for a 15-character name, within 2048 characters; /hook: the parsed body passed on and 204 without a body, also before ready, a 4 MiB body, 413 above it, 411 without Content-Length, 401, 403, 405 with Allow, 400 for invalid JSON, the hook not called
+schedule    cron forms, ranges and errors; day of week 0 and 7; vixie cron's rule for the day fields; matching in local time; checks at minute boundaries with the due log line; one due prompt per entry; due prompts kept for entries set again and dropped for removed ones; the approver rule; listeners; one timer, none after the stop; a timer firing early or late
+http        401 without token; 403 with another Origin; 404 for other paths and for a request target that is not a URL, the server serving on; 503 with Retry-After until ready; SDK validation errors; the live schema, the receive input fields, status live and the required status of send's output; each description, and the instructions for a 15-character name, within 2048 characters; /hook: the parsed body passed on and 204 without a body, also before ready, a 4 MiB body, 413 above it, 411 without Content-Length, 401, 403, 405 with Allow, 400 for invalid JSON, the hook not called; the receive description and output schema with scheduled, and scheduled in a result
 register    entry JSON with headersHelper and no token; timeout from server.json; remove before add; errors; on Windows, claude through cmd.exe after ENOENT, with cmd.exe quoting; the status hooks of every event, with NUL on Windows; the user settings file from CLAUDE_CONFIG_DIR, or ~/.claude when it is unset or empty; the local settings file; this agent's handlers replaced, other settings, hooks and groups kept, the same text at a second register; invalid settings files reported after the entry is added, and left unchanged; no status hooks after a failed add
 files       lock: exclusive create, a running PID, a stale PID; folder mode at every start; headers.json and hook-headers; file modes set again on existing files
 log         every SimpleX error shape worded by the apps, in its JSON shape from @simplex-chat/types; the chain for other errors
@@ -2112,19 +2231,33 @@ C6      Claude Code closes the request stream when a call times out or its task 
 - Version 0.3.0.
 - Claude Code activity (`plans/2026-11-11-mcp-live-activity.md`): `register` writes status hooks into the Claude Code settings file of its scope; Claude Code runs curl as an async command hook, and curl posts each hook event to `/hook` with the token. The permission prompts, compaction, running tools and subagents of the agent's Claude Code sessions are shown in the status message.
 - In the `receive` description, a note with `live: true` is requested in the same response as the tool call of a step that takes minutes.
+- Scheduled prompts (`plans/2026-11-11-mcp-schedule.md`): the server holds the schedules, in the custom data of each chat, and returns each due prompt in `scheduled` of `receive` of the chat.
+- Approvers add, remove and list schedules with `/schedule`, `/unschedule` and `/schedules` in the agent control chat, in both modes; a deployment needs no configuration change.
+- Cron syntax, numbers only, in the local time of the server process.
+- A schedule applies while its author is an approver.
 
 ## Decisions of 2026-11-12
 
 - Status at the arrival of a message (`plans/2026-11-11-mcp-live-activity.md`, decision 8): after a `receive` with `typing` in a chat, the server posts the status message at once at a message received there while the chat has none, with the label `received, waiting for the agent`; the label is `thinking` from the return of messages by a `receive` with `typing` or a `send`.
 - `/abort` (`plans/2026-11-12-mcp-abort.md`): with `serve --abort-file FILE`, in mode `requests` only and with FILE in a folder disjoint from the data folder, each status line ends with ` · /abort`. At a text message `/abort`, trimmed, from anyone in the main conversation of a chat whose status message is shown, the message is kept from `receive` and `send` and marked read; the count plus 1 is written to `FILE.part` with mode 0644, which is renamed to FILE, and 1 is then added to the count; every status message of the server is ended with `◼ aborted`; the sender and the chat are logged on one line. Elsewhere, `/abort` is an ordinary message. At the start, a missing FILE, or one without a count, is written with 0. The script that runs the agent reads FILE's first line, a missing FILE counting as 0, about every second, and restarts the agent's process group at each change. Without the option, the behavior is unchanged.
+- The reply to `/help` has one line per command of the commands reply, in its order.
+- How to use a command is shown by `/help COMMAND`, COMMAND written with or without its `/`. One text is given for related commands: `/approve` and `/reject`; `/receive` and `/forward`; `/schedule`, `/unschedule` and `/schedules`.
+- Other text after `/help` is answered with one fixed reply, without that text.
+- The server answers `/help` and `/help COMMAND` from every member who can post in the agent control chat; it accepts the other commands from approvers only.
+- The command menu has `/help`.
+- The limits in the help texts are read from the constants that the server checks.
 
 ## Decisions of 2026-11-13
 
 - The `typing` input of `receive` is removed: each `receive` that returns messages starts the status message of an eligible chat, and each message received in an eligible chat without a status message starts a waiting status.
 - A live message is received at the update that completes it, and its waiting status starts then; an edit starts none (`plans/2026-11-11-mcp-live-activity.md`, decision 10).
+- In a plugin session group, `/help help` states the rule of that group: only admins and owners send its `/` commands, `/help` included, and approve actions.
+- In a plugin session group, `/help` lists `/give` and `/observer` before the line of `/help COMMAND`, and `/help give` and `/help observer` explain them.
 
 ## Decisions of 2026-11-14
 
 - With the status hooks, the status messages other than waiting ones are deleted when every agent session has ended its turn, at Stop, StopFailure or SessionEnd, and no call runs; `serve` without the hooks is unchanged (`plans/2026-11-11-mcp-live-activity.md`, decision 11).
 - `register` adds a status hook of `Notification`; Claude Code's idle notification, `notification_type` `idle_prompt`, ends the turn of its session as Stop does, so the label of a refused permission prompt ends about one minute after the refusal (`plans/2026-11-11-mcp-live-activity.md`, decision 12).
 - At an `/abort`, after the statuses are ended, the turn of every agent session is ended as at its Stop, so a session that the script stops without a Stop keeps neither a turn nor labels (`plans/2026-11-12-mcp-abort.md`, decision 13).
+- In a plugin session group, `/help` also lists `/approve N all` and `/revoke TOOL` before `/give`.
+- There, `/help approve` and `/help revoke` start with a line on the approval of a tool and its end, `/help list` ends with a line on the approved tools, and `/help observer` counts the approvals of tools among the approvals that stop applying.

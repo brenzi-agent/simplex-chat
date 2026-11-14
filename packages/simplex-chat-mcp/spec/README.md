@@ -30,13 +30,15 @@ With `--abort-file FILE`, the status line ends with ` · /abort`. At a message `
 
 `register` also adds status hooks to the Claude Code settings file of its scope. Claude Code then runs curl at each hook event, and curl posts the event to `/hook` of the server with the token. For the sessions that called a tool of this server, the Claude Code tool, permission prompt, subagent or compaction in progress is shown in the status line. At the end of a turn after which none of these sessions runs a turn, while no call runs, the status messages are deleted, except those of messages not yet taken.
 
-The server keeps actions and downloads in memory, and they are lost when the process exits. The action counter and the standing approvals are stored as custom data in the chat database. The token, the headers files for the host and its hooks, the server record and the lock are files in the data folder; downloaded files are in its `files` folder, one folder per chat.
+An owner can also schedule prompts for a chat with `/schedule CHAT CRON PROMPT` in the agent control chat. At each minute that the cron expression matches in the server's local time, the prompt becomes due; it is returned by the next `receive` of that chat in the field `scheduled`, and a waiting `receive` of that chat ends at once. A schedule applies only while its author is an approver.
+
+The server keeps actions, downloads and due scheduled prompts in memory, and they are lost when the process exits. The action counter, the standing approvals and the schedules are stored as custom data in the chat database. The token, the headers files for the host and its hooks, the server record and the lock are files in the data folder; downloaded files are in its `files` folder, one folder per chat.
 
 The package is also a Claude Code plugin. Each Claude Code session runs `simplex-mcp session`, a stdio MCP server. The session server forwards tool calls over a local socket to `simplex-mcp service`, one service per data root. Requests on the socket are HTTP/1.1 with a bearer token. The service runs two cores:
 - `Claude` is the profile that peers see. It holds the Main group, one group per session and the chats with peers. In a session's group it posts Claude's texts and answers, one line for each step, for each of Claude Code's own prompts and for each summary of the session's context, and the end line of each turn.
 - `User` is a member of every session group. It posts the prompts typed in the terminal.
 
-Each session has the six tools and `reply`, and its group has its own `Actions` and `Control`. A chat belongs to the session that connected it. Admins and owners of the session group move a chat to another session with `/give`.
+Each session has the six tools and `reply`, and its group has its own `Actions` and `Control`. A chat belongs to the session that connected it. Admins and owners of the session group move a chat, with its schedules, to another session with `/give`.
 
 Every member of the Main group is trusted with all sessions. The Main group's owners are invited to each session group as owners. Another member of the Main group joins a session group as an admin with `/join N` there.
 
@@ -74,6 +76,7 @@ graph TD
   serve --> files["files.ts"]
   serve --> messages
   serve --> log
+  serve --> schedule["schedule.ts"]
   serve --> version["version.ts"]
   session --> client["client.ts"]
   session --> config["config.ts"]
@@ -105,6 +108,7 @@ graph TD
   hub --> messages
   hub --> log
   hub --> config
+  hub --> schedule
   hub -.-> protocol
   mainGroup --> control
   mainGroup --> tools
@@ -143,6 +147,7 @@ graph TD
   control --> qr
   control --> log
   control -.-> serve
+  control --> schedule
   tools --> actions
   tools --> messages
   tools --> log
@@ -159,9 +164,12 @@ graph TD
   status -.-> activity
   activity --> inference
   inference --> log
+  tools -.-> schedule
   actions --> messages
   actions --> log
   actions -.-> tools
+  schedule --> messages
+  schedule --> log
   config --> messages
   config -.-> actions
   protocol -.-> config
@@ -203,7 +211,8 @@ graph TD
 | [`inference.ts`](../src/inference.ts) | inference endpoint poller: model states, prompt tokens, tokens per second |
 | [`activity.ts`](../src/activity.ts) | Claude Code activity from hook events: agent sessions, running tools, subagents, permission prompts, compaction |
 | [`actions.ts`](../src/actions.ts) | action records, state machine, expiry timers, per-session limits, stop |
-| [`control.ts`](../src/control.ts) | agent control chat and session groups: link, owners, owner commands, cards, counter |
+| [`control.ts`](../src/control.ts) | agent control chat and session groups: link, owners, owner commands, cards, counter, schedule storage |
+| [`schedule.ts`](../src/schedule.ts) | scheduled prompts: cron check and matching, minute timer, due prompts per chat |
 | [`messages.ts`](../src/messages.ts) | message items and their files, item watch, waits, unread paging, display names, durations |
 | [`core.ts`](../src/core.ts) | one SimpleX core: init, user, network config, temp folder, event buffer, profile update |
 | [`files.ts`](../src/files.ts) | data folders, lock, token, `headers.json`, `hook-headers`, `server.json`, session folders, socket path, service log, the abort count of `--abort-file` |
@@ -263,6 +272,7 @@ Claude Code uses these files of the plugin, described in [API 4.8](api.md#48-plu
 | Action store | [`src/actions.ts`](../src/actions.ts) | `Actions` |
 | Agent control chat and session groups | [`src/control.ts`](../src/control.ts) | `Control` |
 | Card text | [`src/control.ts`](../src/control.ts) | `cardText` |
+| Scheduled prompts | [`src/schedule.ts`](../src/schedule.ts) | `Schedules` |
 | Item watch | [`src/messages.ts`](../src/messages.ts) | `ChatItemsWatch` |
 | Claude Code entry of `serve` | [`src/register.ts`](../src/register.ts) | `register` |
 | Status hooks | [`src/register.ts`](../src/register.ts) | `statusHooks` |
