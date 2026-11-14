@@ -58,6 +58,7 @@ An agent run with `serve`, outside the plugin, takes secrets from its owners: st
 The agent is tested with Claude Code. Tell us which other apps and models you want to use in [an issue](https://github.com/simplex-chat/simplex-chat/issues), or contribute.
 
 You can switch the model of an agent that a script runs in opencode: start `serve` with `--models` and `--model-file`, then send `/model` in its agent control chat and tap one of the models you listed ([details](https://github.com/simplex-chat/simplex-chat/blob/master/packages/simplex-chat-mcp/REFERENCE.md#the-agents-model)).
+opencode with a local model is configured by hand: [LOCAL-MODELS.md](https://github.com/simplex-chat/simplex-chat/blob/master/packages/simplex-chat-mcp/LOCAL-MODELS.md).
 
 ## Reference
 

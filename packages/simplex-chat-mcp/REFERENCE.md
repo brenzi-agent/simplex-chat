@@ -925,6 +925,7 @@ The script that runs opencode:
 - Define each PROVIDER/MODEL of `--models` in opencode's configuration.
 
 When opencode stops while a `receive` waits, the server aborts the call without marking messages read, and the agent receives them in the new session.
+opencode with a local llama.cpp model behind llama-swap: [LOCAL-MODELS.md](LOCAL-MODELS.md).
 
 ## Recovery
 
