@@ -31,6 +31,15 @@ export interface ServerFile {
 // spec: spec/architecture.md#files-secretrecord
 export type SecretRecord = {setBy: string; setById: number; setAt: string}
 
+// spec: spec/architecture.md#files-modelentry
+export type ModelEntry = {name: string; model: string}
+
+// spec: spec/architecture.md#files-modelentry
+export type ModelOptions = {models: ModelEntry[]; file: string}
+
+// spec: spec/architecture.md#files-modelentry
+export type ModelSelection = ModelOptions & {selected: ModelEntry}
+
 // spec: spec/architecture.md#files-secretrecord
 export const secretName = /^[A-Z][A-Z0-9_]{0,63}$/
 
@@ -214,6 +223,21 @@ export class Secrets {
     writePrivateFile(this.index, `${JSON.stringify(records)}\n`)
     return true
   }
+}
+
+// spec: spec/architecture.md#files-modelatstart
+export function modelAtStart({models, file}: ModelOptions): ModelSelection {
+  const line = existsSync(file) ? readFileSync(file, "utf8").split("\n")[0] : undefined
+  const selected = models.find(({model}) => model === line) ?? models[0]
+  if (selected.model !== line) writeModelFile(file, selected.model)
+  return {models, file, selected}
+}
+
+// spec: spec/architecture.md#files-writemodelfile
+export function writeModelFile(file: string, model: string): void {
+  writeFileSync(`${file}.part`, `${model}\n`, {mode: 0o644})
+  if (process.platform !== "win32") chmodSync(`${file}.part`, 0o644)
+  renameSync(`${file}.part`, file)
 }
 
 // spec: spec/architecture.md#files-saveheldtitles

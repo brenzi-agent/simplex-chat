@@ -9,7 +9,7 @@ import {Activity} from "./activity"
 import {AudioOptions} from "./audio"
 import {Control, controlDataOf, createControlChat, findControlGroup, hasOutcomeCard, isControlEvent, resetControlChat} from "./control"
 import {bufferEvents, prepareCore, updatedUser} from "./core"
-import {Secrets, abortCounter, acquireLock, createDataFolder, releaseLock, serverToken, writeHeadersFile, writeServerFile} from "./files"
+import {ModelOptions, ModelSelection, Secrets, abortCounter, acquireLock, createDataFolder, modelAtStart, releaseLock, serverToken, writeHeadersFile, writeServerFile} from "./files"
 import {startHttp, stopHttp} from "./http"
 import {inferencePoller} from "./inference"
 import {ExitError, log, logError, shellPath} from "./log"
@@ -47,6 +47,7 @@ export interface ServeOptions {
   abortFile?: string
   audio?: AudioOptions
   secrets?: string
+  model?: ModelOptions
 }
 
 // spec: spec/architecture.md#serve-runningserver
@@ -87,14 +88,16 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
     const token = serverToken(data, options.newToken)
     writeHeadersFile(data, token)
     const abort = options.abortFile === undefined ? undefined : abortCounter(options.abortFile)
+    const model = options.model === undefined ? undefined : modelAtStart(options.model)
     const chat = await api.ChatApi.init({type: "sqlite", filePrefix: join(data, "simplex")})
     log(`SimpleX MCP server ${fullVersion}, agent "${name}"`)
     log(`Data folder: ${data}`)
     log(`Approval mode: ${options.approve}`)
     if (options.inference !== undefined) log(`Inference endpoint: ${options.inference}`)
     if (audio !== undefined) log(`Audio: ${audio.url}, speech-to-text ${audio.stt}, text-to-speech ${audio.tts}${audio.voice === undefined ? "" : `, voice ${audio.voice}`}`)
+    if (model !== undefined) log(`Model: ${model.selected.name} (${model.selected.model}), in ${model.file}`)
     try {
-      return await startAgent(chat, options, token, inference, abort)
+      return await startAgent(chat, options, token, inference, abort, model)
     } catch (error) {
       await chat.close().catch(() => undefined)
       throw error
@@ -106,7 +109,7 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
 }
 
 // spec: spec/architecture.md#serve-startagent
-async function startAgent(chat: api.ChatApi, options: ServeOptions, token: string, inference: ReturnType<typeof inferencePoller> | undefined, abort: ReturnType<typeof abortCounter> | undefined): Promise<RunningServer> {
+async function startAgent(chat: api.ChatApi, options: ServeOptions, token: string, inference: ReturnType<typeof inferencePoller> | undefined, abort: ReturnType<typeof abortCounter> | undefined, model: ModelSelection | undefined): Promise<RunningServer> {
   const {name, data, port, approve, expireHours} = options
   const secrets = options.secrets === undefined ? undefined : new Secrets(options.secrets, join(data, "secrets.json"))
   const created = (await chat.apiGetActiveUser()) ?? (await chat.apiCreateActiveUser({displayName: options.displayName ?? name, fullName: "", peerType: T.ChatPeerType.Agent}))
@@ -127,7 +130,7 @@ async function startAgent(chat: api.ChatApi, options: ServeOptions, token: strin
   const activity = new Activity(name, () => tools.statuses.turnsEnded())
   const schedules = new Schedules(memberId => control.isCurrentApprover(memberId))
   const tools = new AgentTools({chat, user, actions, watch, controlChat: () => control.chatRef, standingApprover: (chatInfo, standing) => control.standingApprover(chatInfo, standing), refusedFile: (path, chatInfo, chat) => control.refusedFile(path, chatInfo, chat), data, inference, activity, abort, schedules, audio: options.audio, secrets}, approve)
-  const control: Control = new Control(chat, group, {displayName, owners: options.owners, registerHint: registerHint(options), qrCode: options.qrCode, secrets}, actions, tools, schedules)
+  const control: Control = new Control(chat, group, {displayName, owners: options.owners, registerHint: registerHint(options), qrCode: options.qrCode, secrets, model}, actions, tools, schedules)
   await control.load()
   await tools.deleteLeftoverStatuses().catch(error => logError("status messages", error))
   const factory = (): McpServer => {

@@ -88,6 +88,10 @@ Claude Code plugin ([participants](#claude-code-plugin-flows)):
 
 37. [Restart notice](#37-restart-notice)
 
+`serve`, continued:
+
+37. [`/model`](#37-model)
+
 ---
 
 ## 1. First start and the owner joins
@@ -101,8 +105,10 @@ sequenceDiagram
   participant O as Owner
   P->>S: simplex-mcp serve my-agent --display-name "My Agent"
   S->>S: DATA mode 0700, lock, token, headers.json, hook-headers
+  S->>S: DATA mode 0700, lock, token, headers.json
+  S->>S: with --models: FILE read, or the first model written to it
   S->>C: ChatApi.init DATA/simplex
-  S->>P: version line, data folder, approval mode
+  S->>P: version line, data folder, approval mode, with --models the model line
   S->>C: apiGetActiveUser (none)
   S->>C: apiCreateActiveUser {displayName: "My Agent", fullName: "", peerType: agent}
   S->>C: apiSetNetworkConfig smpProxyMode always, smpProxyFallback allowProtected
@@ -153,6 +159,9 @@ Source: [`main`, `readStdin`](../src/cli.ts), [`startServer`, `startAgent`](../s
 - The restart notice is posted before anyone joins; the control chat has history on, so the core sends it to the owner with the chat's history ([`createControlChat`](../src/control.ts), [flow 37](#37-restart-notice)).
 
 Source: [`main`, `readStdin`](../src/cli.ts), [`startServer`, `startAgent`](../src/serve.ts), [`prepareCore`, `deletePresetContacts`, `updatedUser`, `bufferEvents`, `setTempFolder`](../src/core.ts), [`createDataFolder`, `acquireLock`, `releaseLock`, `serverToken`, `headersFile`, `writeHeadersFile`, `writeServerFile`](../src/files.ts), [`startHttp`](../src/http.ts), [`Control.load`, `rename`, `describe`, `updateProfile`, `start`, `postRestartNotice`, `startOwners`, `openLink`, `deleteLink`, `findControlGroup`, `controlDataOf`, `createControlChat`, `createGroup`](../src/control.ts).
+- With `--models`, the model line is `Model: NAME (PROVIDER/MODEL), in FILE`, and `load` sets the menu with `/model` by one `apiUpdateGroupProfile`, as the new group has the menu without it ([`startServer`](../src/serve.ts), [`Control.load`, `createControlChat`](../src/control.ts)).
+
+Source: [`main`, `readStdin`](../src/cli.ts), [`startServer`, `startAgent`](../src/serve.ts), [`prepareCore`, `deletePresetContacts`, `updatedUser`, `bufferEvents`, `setTempFolder`](../src/core.ts), [`createDataFolder`, `acquireLock`, `releaseLock`, `serverToken`, `headersFile`, `writeHeadersFile`, `writeServerFile`, `modelAtStart`, `writeModelFile`](../src/files.ts), [`startHttp`](../src/http.ts), [`Control.load`, `rename`, `describe`, `updateProfile`, `start`, `startOwners`, `openLink`, `deleteLink`, `findControlGroup`, `controlDataOf`, `createControlChat`, `createGroup`](../src/control.ts).
 
 ---
 
@@ -1026,6 +1035,7 @@ sequenceDiagram
 Notes:
 
 - Every message of a member other than `User` is a prompt, however the member joined, except a one-line `/` text. Claude answers a one-line `/` text of a moderator, member or author with `Only admins and owners of this group can send / commands.` From an admin or owner, a one-line `/` text is a command of the group. For one outside the group's requests, such as `/model sonnet`, Claude posts `Unknown command.` as a new message, without a quote ([`Session.onMessage`, `prompt`, `refusesCommand`, `approves`](../src/hub.ts), [`Control.onMessage`, `ownerCommand`, `parseCommand`](../src/control.ts)).
+- Every message of a member other than `User` is a prompt, however the member joined, except a one-line `/` text. Claude answers a one-line `/` text of a moderator, member or author with `Only admins and owners of this group can send / commands.` From an admin or owner, a one-line `/` text is a command of the group. For one outside the group's requests, such as `/compact`, the reply is `Unknown command.` `/model` and `/model NAME` are requests, and their reply is `This server runs without --models.` ([`Session.onMessage`, `prompt`, `refusesCommand`, `approves`](../src/hub.ts), [`Control.ownerCommand`, `switchModel`, `parseCommand`](../src/control.ts)).
 - The session handles messages in arrival order. So a prompt is delivered after the file of an earlier prompt. The reply to a one-line `/` text of a moderator, member or author is posted after the earlier prompts ([`Session.onMessage`, `queue`](../src/hub.ts)).
 - After a service start, a prompt that arrives before its session attaches again is held up to 30 s from the hub's open. So a prompt sent while the service was stopped is still delivered to the session ([`Session.deliver`, `Hub.open`](../src/hub.ts)).
 - In a session started without the channel flag, Claude Code receives the notification and drops it.
@@ -1848,6 +1858,7 @@ Source: [`hooks.json`](../hooks/hooks.json), [`display`](../src/display.ts), [`p
 
 <a id="secret-flow"></a>`SECRETS` is the folder of `--secrets-folder`.
 ## 37. Restart notice
+## 37. `/model`
 
 ```mermaid
 sequenceDiagram
@@ -2042,6 +2053,20 @@ sequenceDiagram
   T->>Q: stop listening
   T-->>A: {chat: #35;15, messages: [], more: 0, scheduled: [{prompt: "Post the trail report.", at: "YYYY-MM-DD 06:00 UTC"}]}
   A->>T: send {chat: #35;15, text}
+  participant K as Control
+  participant C as Core
+  participant O as Owner
+  participant F as FILE
+  Note over P,F: the person started serve with --models gemma=llama-swap/gemma-4-26b,coder=llama-swap/qwen3-coder-next,large=hosted/large-latest --model-file FILE
+  O->>C: /model
+  C->>K: newChatItems
+  K->>O: The agent's model is `gemma`: `llama-swap/gemma-4-26b`. /'model coder' /'model large'
+  O->>C: /model coder
+  C->>K: newChatItems
+  K->>F: FILE.part: llama-swap/qwen3-coder-next, mode 0644, renamed to FILE
+  K->>P: Model set to coder (llama-swap/qwen3-coder-next) by Alice.
+  K->>O: The agent's model is `coder`: `llama-swap/qwen3-coder-next`. The agent restarts with it. /'model gemma'
+  Note over F: the script that runs opencode reads FILE
 ```
 
 Notes:
@@ -2172,3 +2197,11 @@ Source: [`Control.onMessage`, `onGroupUpdated`, `ownerCommand`, `setSecret`, `re
 - The HTTP listener serves calls to `/mcp` from `started = true`, before `Listening on ...`, also during the posts; the buffered events are replayed after the posts ([`startAgent`](../src/serve.ts)).
 
 Source: [`fullVersion`, `startServer`, `startAgent`, `versionWithCommit`](../src/serve.ts), [`Control.postRestartNotice`, `standingApprover`](../src/control.ts), [`AgentTools.agentChats`, `chatSubject`, `isIncognito`, `isConnected`, `readOnlyRole`](../src/tools.ts), [`prepack`, `postpack`](../package.json).
+- `/model` and `/model NAME` are accepted from approvers, in both modes; each reply quotes the command ([`Control.onMessage`, `ownerCommand`](../src/control.ts)).
+- `/model` with two or more words gets the commands reply ([`Control.ownerCommand`, `ownerRequest`](../src/control.ts)).
+- A NAME outside `--models`, also a PROVIDER/MODEL value, gets `No such model. /model shows the models.`, and the selected NAME gets ``The agent's model is already `NAME`.``; FILE is not written ([`Control.switchModel`](../src/control.ts)).
+- After a failed write of FILE, the selection is unchanged, no reply is sent, and the error is logged as `control chat command: ERROR` ([`Control.onMessage`, `switchModel`](../src/control.ts)).
+- At the next start, the model in the first line of FILE is selected again when it is a PROVIDER/MODEL of `--models` ([`modelAtStart`](../src/files.ts)).
+- The script that runs opencode is outside the server; its contract is in [Reference](../REFERENCE.md#the-agents-model).
+
+Source: [`Control.onMessage`, `switchModel`, `ownerRequest`](../src/control.ts), [`writeModelFile`](../src/files.ts).

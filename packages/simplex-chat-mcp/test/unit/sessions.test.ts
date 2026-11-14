@@ -1934,8 +1934,8 @@ describe("session channel", () => {
       {prompt: {text: "//compact\nthen go on", from: "Dan", item: 53}},
       {prompt: {text: "/!ls\nthen go on", from: "Dan", item: 54}},
     ])
-    expect(chat.replies).toEqual([])
-    expect(answers(chat).filter(([{text}]) => text === unknownCommand)).toEqual([40, 41, 42, 46].map(() => [{text: unknownCommand, quotedItemId: undefined}]))
+    expect(chat.replies).toEqual(["This server runs without --models."])
+    expect(answers(chat).filter(([{text}]) => text === unknownCommand)).toEqual([41, 42, 46].map(() => [{text: unknownCommand, quotedItemId: undefined}]))
     expect(answers(chat).filter(([{text}]) => text !== unknownCommand)).toEqual([43, 44, 47, 48, 49].map(quotedItemId => [{text: commandsApproversOnly, quotedItemId}]))
   })
 

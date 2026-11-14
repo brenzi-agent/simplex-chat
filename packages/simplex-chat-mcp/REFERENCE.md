@@ -33,6 +33,7 @@ Status: v0.3. [`TESTING.md`](TESTING.md) describes a local build and test. The d
 - [Other MCP hosts](#other-mcp-hosts)
 - [Voice messages](#voice-messages)
 - [Secrets](#secrets)
+- [The agent's model](#the-agents-model)
 - [Recovery](#recovery)
 - [Command reference](#command-reference)
 - [Data folder](#data-folder)
@@ -303,6 +304,11 @@ After `/leave #9`, or after the agent's `leave` of #9 is performed in either mod
 After `/leave #9`, or after the agent's `leave` of #9 is performed in either mode, when the chat's folder has files, the agent posts ``Files from business Ridgeline (#9) are kept in `/home/alice/.simplex-mcp/my-agent/files/group-9`: 3 files, 2.1 MB. /delete #9 files``. The files forwarded from #9 are deleted when the agent leaves it.
 
 `/pending`, `/list`, `/leave` and `/secrets` are in the chat's command menu; the cards show the action commands, and the reply to `/secret` shows `/unsecret`. Tapping `/leave` in the menu puts `/leave <chat ID>` into the entry field: replace `<chat ID>` with the chat's ID from `/list`, such as `#9`, and send it. Each command includes its number, because the app sends a tapped command as a new message, without a quote. Every card form and reply is listed in the [design record](../../plans/2026-10-19-mcp-server.md), section "What the owner sees: the agent control chat".
+| `/model`, `/model coder` | With `--models`: shows the agent's model with a command for each other model, or selects model `coder`, in both approval modes. The script that runs the agent restarts it with that model: [The agent's model](#the-agents-model). |
+
+After `/leave #9`, or after the agent's `leave` of #9 is performed in either mode, when the chat's folder has files, the agent posts ``Files from business Ridgeline (#9) are kept in `/home/alice/.simplex-mcp/my-agent/files/group-9`: 3 files, 2.1 MB. /delete #9 files``. The files forwarded from #9 are deleted when the agent leaves it.
+
+`/pending`, `/list` and `/leave` are in the chat's command menu, and `/model` with `--models`; the cards show the others. Tapping `/leave` in the menu puts `/leave <chat ID>` into the entry field: replace `<chat ID>` with the chat's ID from `/list`, such as `#9`, and send it. Each command includes its number, because the app sends a tapped command as a new message, without a quote. Every card form and reply is listed in the [design record](../../plans/2026-10-19-mcp-server.md), section "What the owner sees: the agent control chat".
 
 ### Approval of all messages to a chat
 
@@ -877,6 +883,48 @@ These are sent to the model provider as they are:
 - tool results of workflow models, which opencode returns to the provider without the plugin.
 
 The plugin fails closed: when `SIMPLEX_MCP_SECRETS` is unset, when the folder or one of its files can't be read, or when a value has fewer than 8 characters, it throws, and opencode sends no request to the model for that step. The hook it uses, `experimental.chat.messages.transform`, is experimental in opencode. This section describes opencode 1.19.5.
+## The agent's model
+
+With `--models` and `--model-file`, an owner selects the model of an agent that a script runs in opencode. The server only writes the selected model to the file; the script restarts the agent.
+
+```
+npx -y @simplex-chat/mcp serve my-agent --models gemma=llama-swap/gemma-4-26b,coder=llama-swap/qwen3-coder-next,large=hosted/large-latest --model-file /run/agent-model/model
+```
+
+- Each item of `--models` is `NAME=PROVIDER/MODEL`. Owners type NAME; opencode's `--model` takes PROVIDER/MODEL.
+- NAME: 1 to 16 lowercase letters, digits and hyphens, starting with a letter. PROVIDER: 1 to 32 letters, digits, `_`, `.` and `-`, starting with a letter or digit. MODEL: 1 to 64 letters, digits and `_.:/+@-`.
+- Names are unique, and so are PROVIDER/MODEL values. The first item is the default.
+- The start prints `Model: gemma (llama-swap/gemma-4-26b), in /run/agent-model/model`.
+
+In the agent control chat:
+
+```
+/model        The agent's model is `gemma`: `llama-swap/gemma-4-26b`.
+              /model coder
+              /model large
+/model coder  The agent's model is `coder`: `llama-swap/qwen3-coder-next`. The agent restarts with it. /model gemma
+/model gemma  The agent's model is already `gemma`.
+/model gpt    No such model. /model shows the models.
+```
+
+- Only approvers select a model, in both approval modes. The command at the end of a switch reply selects the previous model.
+- With `--models`, `/model` is in the chat's command menu. Without it, `/model` replies `This server runs without --models.`
+- A switch is logged: `Model set to coder (llama-swap/qwen3-coder-next) by Alice.`
+
+The file of `--model-file`, FILE:
+
+- FILE contains the selected PROVIDER/MODEL and a newline, with mode 0644. The server writes `FILE.part` and renames it to FILE.
+- The server writes FILE at each switch, and at a start when FILE is missing or its first line is no PROVIDER/MODEL of `--models`. Otherwise FILE and its model are kept at a start.
+- FILE's folder must exist and be writable by the server. It must be outside the data folder and must not contain it.
+
+The script that runs opencode:
+
+- Mount FILE's folder read-only into the agent's container, not FILE itself: a bind mount of one file references the replaced file after a rename ([moby/moby#15793](https://github.com/moby/moby/issues/15793)).
+- Before each run, read the first line of FILE and pass it to `opencode run --model` as one argument.
+- While opencode runs, read FILE every few seconds. When its first line differs from the running model, stop opencode and start it with the new model in a new session, without `--continue`.
+- Define each PROVIDER/MODEL of `--models` in opencode's configuration.
+
+When opencode stops while a `receive` waits, the server aborts the call without marking messages read, and the agent receives them in the new session.
 
 ## Recovery
 
@@ -945,6 +993,12 @@ serve options:
                          model STT, text-to-speech model TTS, its voice VOICE
   --secrets-folder DIR   folder of the secrets that owners set with /secret,
                          one file per name; disjoint from the data folder
+  --models MODELS        opencode models NAME=PROVIDER/MODEL, comma-separated;
+                         /model NAME selects one in the agent control chat;
+                         the first is the default; requires --model-file
+  --model-file FILE      file with the selected PROVIDER/MODEL for the script
+                         that runs opencode; in a folder disjoint from the
+                         data folder
 
 register options:
   --scope SCOPE          user (default) or local
@@ -979,6 +1033,7 @@ The folder is readable only by the user: every start sets its mode to 0700, exce
 
 The server keeps its action counter in the chat database, as custom data of the agent control chat; the approvals of all messages to a chat and of all files from it, and the chat's schedules, as custom data of that chat; and its actions and due scheduled prompts in memory.
 The server keeps its action counter in the chat database, as custom data of the agent control chat, the approvals of all messages to a chat and of all files from it, and copies off, as custom data of that chat, and its actions in memory.
+The server keeps its action counter in the chat database, as custom data of the agent control chat, the approvals of all messages to a chat and of all files from it as custom data of that chat, and its actions in memory. With `--models`, the selected model is kept only in the file of `--model-file`, outside the data folder.
 
 The server keeps no log file: it writes its log to the terminal where `serve` runs, events to stdout and errors to stderr. Each note of a status message is written to stdout, for example `Note to contact Alice (@4): Reading the file…`.
 
@@ -1009,6 +1064,7 @@ One server runs per data folder: a second one exits, because two processes on on
 - With `--audio` and `/receive #N 7 all`, voice messages from that chat of at most 300 seconds and 1,500,000 bytes, on the agent's XFTP servers, are downloaded and transcribed without asking; the audio API decodes their audio.
 - Transcripts contain the words of peers: they are marked as data, not instructions, in the agent's instructions and in the field descriptions. They are kept off cards and out of the log.
 - You approve a voice reply by its text; no audio is on the card.
+- With `--models`, only approvers switch the agent's model, and only to an item of `--models`; an unknown name is left out of the reply. The file of `--model-file` contains only PROVIDER/MODEL, in a folder outside the data folder; mount that folder read-only in the agent's container.
 - Peers of a chat connected as the agent see its profile; peers of an incognito chat see a random profile made for that chat only.
 - The agent has no address, so nobody can contact it first.
 - The agent uses private message routing: the SMP server that holds a contact's queue does not see the agent's IP address.

@@ -39,7 +39,7 @@ describe("serve options", () => {
 
   it("reads every option", () => {
     const {options} = parseCommand(
-      ["serve", "agent-2", "--data", "/tmp/a", "--display-name", "Agent Two", "--approve", "host", "--expire", "1", "--stop-wait", "0", "--port", "5227", "--qr-code", "large", "--audio", "http://127.0.0.1:8080,stt,tts,ana", "--new-token", "--reset-owners", "--owners", "--secrets-folder", "/tmp/s"],
+      ["serve", "agent-2", "--data", "/tmp/a", "--display-name", "Agent Two", "--approve", "host", "--expire", "1", "--stop-wait", "0", "--port", "5227", "--qr-code", "large", "--audio", "http://127.0.0.1:8080,stt,tts,ana", "--new-token", "--reset-owners", "--owners", "--secrets-folder", "/tmp/s", "--models", "gemma=llama-swap/gemma-4-26b", "--model-file", "/tmp/model/model"],
       home,
     ) as {options: object}
     expect(options).toEqual({
@@ -57,6 +57,7 @@ describe("serve options", () => {
       resetOwners: true,
       owners: [],
       secrets: "/tmp/s",
+      model: {models: [{name: "gemma", model: "llama-swap/gemma-4-26b"}], file: "/tmp/model/model"},
     })
   })
 
@@ -78,6 +79,64 @@ describe("serve options", () => {
     expect(usage(["serve", "agent", "--secrets-folder", "/tmp/a/secrets", "--data", "/tmp/a"])).toBe(refused("/tmp/a/secrets"))
     expect(usage(["serve", "agent", "--secrets-folder", "/home/alice/.simplex-mcp"])).toBe(refused("/home/alice/.simplex-mcp"))
     expect(usage(["serve", "agent", "--secrets-folder"])).toBe("--secrets-folder: a value expected.")
+  })
+
+  it("takes the models with their file, resolved to an absolute path", () => {
+    const models = "gemma=llama-swap/gemma-4-26b,coder=llama-swap/qwen3-coder-next,large=hosted/large-latest"
+    expect(parseCommand(["serve", "agent", "--model-file", "agent-model/model", "--models", models], home)).toMatchObject({
+      options: {
+        model: {
+          models: [
+            {name: "gemma", model: "llama-swap/gemma-4-26b"},
+            {name: "coder", model: "llama-swap/qwen3-coder-next"},
+            {name: "large", model: "hosted/large-latest"},
+          ],
+          file: join(process.cwd(), "agent-model", "model"),
+        },
+      },
+    })
+    const limits = `${"g".repeat(16)}=${"p".repeat(32)}/${"m".repeat(64)},a=p_1.x-y/m.1:2/z+q@r-s_t`
+    expect(parseCommand(["serve", "agent", "--models", limits, "--model-file", "/tmp/model"], home)).toMatchObject({
+      options: {model: {models: [{name: "g".repeat(16), model: `${"p".repeat(32)}/${"m".repeat(64)}`}, {name: "a", model: "p_1.x-y/m.1:2/z+q@r-s_t"}]}},
+    })
+  })
+
+  it("refuses models that are not NAME=PROVIDER/MODEL items with unique names and models", () => {
+    const refused = [
+      "llama-swap/gemma-4-26b",
+      "gemma=llama-swap",
+      "gemma=-llama-swap/gemma-4-26b",
+      "-gemma=llama-swap/gemma-4-26b",
+      "Gemma=llama-swap/gemma-4-26b",
+      `${"g".repeat(17)}=llama-swap/gemma-4-26b`,
+      `gemma=${"p".repeat(33)}/gemma-4-26b`,
+      `gemma=llama-swap/${"m".repeat(65)}`,
+      "gemma=llama-swap/gemma 4",
+      "gemma=llama-swap/`gemma`",
+      "gemma=llama-swap/gemma-4-26b,",
+      "gemma=llama-swap/gemma-4-26b,,coder=llama-swap/qwen3-coder-next",
+      "gemma=llama-swap/gemma-4-26b,gemma=llama-swap/qwen3-coder-next",
+      "gemma=llama-swap/gemma-4-26b,coder=llama-swap/gemma-4-26b",
+      "",
+    ]
+    for (const models of refused) {
+      expect(usage(["serve", "agent", "--models", models, "--model-file", "/tmp/model"])).toBe(`--models: NAME=PROVIDER/MODEL,... expected, got ${models}`)
+    }
+    expect(usage(["serve", "agent", "--models"])).toBe("--models: a value expected.")
+  })
+
+  it("takes --models and --model-file only together", () => {
+    expect(usage(["serve", "agent", "--models", "gemma=llama-swap/gemma-4-26b"])).toBe("--models and --model-file: both expected.")
+    expect(usage(["serve", "agent", "--model-file", "/tmp/model"])).toBe("--models and --model-file: both expected.")
+  })
+
+  it("refuses a model file in a folder not disjoint from the data folder", () => {
+    const models = ["--models", "gemma=llama-swap/gemma-4-26b"]
+    for (const file of ["/home/alice/.simplex-mcp/agent/model", "/home/alice/.simplex-mcp/agent", "/home/alice/.simplex-mcp/model"]) {
+      expect(usage(["serve", "agent", ...models, "--model-file", file])).toBe(`--model-file: a file in a folder disjoint from the data folder expected, got ${file}`)
+    }
+    expect(usage(["serve", "agent", "--model-file", "/tmp/a/model/model", ...models, "--data", "/tmp/a"])).toBe("--model-file: a file in a folder disjoint from the data folder expected, got /tmp/a/model/model")
+    expect(parseCommand(["serve", "agent", "--data", "/tmp/a", ...models, "--model-file", "/tmp/ab/model"], home)).toMatchObject({options: {model: {file: "/tmp/ab/model"}}})
   })
 
   it("takes the QR code size", () => {
@@ -222,6 +281,8 @@ describe("help", () => {
       "  --audio URL,STT,TTS[,VOICE]\n                         transcribe voice messages and send voice replies with\n                         the OpenAI-compatible audio API at URL: speech-to-text\n                         model STT, text-to-speech model TTS, its voice VOICE\n",
     )
     expect(helpText).toContain("  --secrets-folder DIR   folder of the secrets that owners set with /secret,\n                         one file per name; disjoint from the data folder\n")
+    expect(helpText).toContain("  --models MODELS        opencode models NAME=PROVIDER/MODEL, comma-separated;\n                         /model NAME selects one in the agent control chat;\n                         the first is the default; requires --model-file\n")
+    expect(helpText).toContain("  --model-file FILE      file with the selected PROVIDER/MODEL for the script\n                         that runs opencode; in a folder disjoint from the\n                         data folder\n")
     expect(helpText.endsWith("--reset-owners takes --owners without a list.\n")).toBe(true)
   })
 })

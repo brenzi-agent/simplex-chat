@@ -85,6 +85,9 @@ flowchart LR
   cc -.->|"commands:<br/>cat SECRETS/NAME"| secrets
   oc -.->|"values replaced<br/>in model requests"| secrets
   oc -->|"POST /mcp"| http
+  control --> files
+  files --> data[("DATA:<br/>token<br/>headers.json<br/>server.json<br/>lock")]
+  files --> modelfile[("FILE of --model-file:<br/>PROVIDER/MODEL")]
   tools --> folder[("DATA/files:<br/>group-N, contact-N<br/>sent")]
   tools --> lib
   control --> lib
@@ -134,11 +137,12 @@ Entry point of the `simplex-mcp` binary.
 | <a id="cli-plugincommands"></a>`pluginCommands` | `session`, `service`, `hook session-start`, `hook turn`, `link`, `reset-owners` |
 | <a id="cli-command"></a>`Command` | `help`, `serve` with `ServeOptions`, `register` with `RegisterOptions`, the plugin commands |
 | <a id="cli-parsecommand"></a>`parseCommand` | command, NAME and options to a `Command`, or the plugin command equal to the joined arguments |
-| <a id="cli-serveoptions"></a>`serveOptions` | defaults and option switch of `serve`; `--reset-owners` with an `--owners` list, `--inference` and `--abort-file` with `--approve host`, and `--abort-file` in a folder not disjoint from the data folder refused; `--secrets-folder` checked against the data folder |
+| <a id="cli-serveoptions"></a>`serveOptions` | defaults and option switch of `serve`; `--reset-owners` with an `--owners` list, `--inference` and `--abort-file` with `--approve host`, and `--abort-file` in a folder not disjoint from the data folder refused; `--secrets-folder` checked against the data folder; `--models` and `--model-file` only together, the file in a folder disjoint from the data folder |
 | <a id="cli-registeroptions"></a>`registerOptions` | defaults and option switch of `register` |
 | <a id="cli-optionreader"></a>`OptionReader` | `value`: the next argument, required<br>`optionalValue`: the next argument, absent when missing or starting with `--` |
 | <a id="cli-validagentname"></a>`validAgentName` | `^[a-z0-9](-?[a-z0-9])*-?$`, at most 32 characters |
 | <a id="cli-inferenceurl"></a>`inferenceUrl` | `--inference`: an `http` or `https` URL without user name and password, to its origin and path without trailing slashes |
+| <a id="cli-modellist"></a>`modelList` | `--models` items `NAME=PROVIDER/MODEL`, names and PROVIDER/MODEL values unique |
 | <a id="cli-usageerror"></a>`usageError` | `ExitError` with code 2 |
 | <a id="cli-main"></a>`main` | `help`, `serve`, `register`, `session`, `service`, the hooks, `link` and `reset-owners`. `help` prints to stdout. The hooks read stdin and print their JSON output. `link` and `reset-owners` print their text. `serve.ts`, `session.ts` and `service.ts` are imported only for their commands, so a hook process loads only the modules of the hooks: `require` of `dist/cli.js` took 244 ms in place of 680 ms, as the median of 7 runs on a host with a load average of 10 on 8 cores. |
 | top-level catch of `main` | `ExitError`: message on stderr, its code; other errors: `logError`, code 1 |
@@ -151,11 +155,11 @@ Start sequence, event dispatch and stop sequence of one agent.
 |---|---|
 | <a id="serve-fullversion"></a>`fullVersion` | the package version with the commit of the build, read once at load: the start line and the restart notice |
 | <a id="serve-ownerentry"></a>`OwnerEntry` | `{memberId, name}` of `--owners` |
-| <a id="serve-serveoptions"></a>`ServeOptions` | name, data folder and its `dataGiven` flag, display name, mode, owners, expiry, reset and token flags, port, QR code size, stop wait, inference URL, abort file, audio options, secrets folder |
+| <a id="serve-serveoptions"></a>`ServeOptions` | name, data folder and its `dataGiven` flag, display name, mode, owners, expiry, reset and token flags, port, QR code size, stop wait, inference URL, abort file, audio options, secrets folder, models and their file |
 | <a id="serve-runningserver"></a>`RunningServer` | token, `ChatApi`, user, `Actions`, `stop` |
 | <a id="serve-serve"></a>`serve` | `startServer`, then SIGINT and SIGTERM handlers: the first signal stops, a second ends the stop wait |
-| <a id="serve-startserver"></a>`startServer` | inference poller with its key, data folder, lock, token, headers files, abort counter, `ChatApi.init`, start lines, `startAgent`; cleanup on error |
-| <a id="serve-startagent"></a>`startAgent` | `Secrets` with `--secrets-folder`, user, `prepareCore`, control group, wiring of `Actions`, `Activity` with `Statuses.turnsEnded`, `Schedules`, `AgentTools` with the inference poller, the activity, the abort counter, the schedules and the audio options, `Control`, leftover status messages, HTTP with `Activity.record` for `/hook`, schedule timer, restart notice, event handler, `stop` |
+| <a id="serve-startserver"></a>`startServer` | inference poller with its key, data folder, lock, token, headers files, abort counter, the model file, `ChatApi.init`, start lines, `startAgent`; cleanup on error |
+| <a id="serve-startagent"></a>`startAgent` | `Secrets` with `--secrets-folder`, user, `prepareCore`, control group, wiring of `Actions`, `Activity` with `Statuses.turnsEnded`, `Schedules`, `AgentTools` with the inference poller, the activity, the abort counter, the schedules and the audio options, `Control` with the selected model, leftover status messages, HTTP with `Activity.record` for `/hook`, schedule timer, restart notice, event handler, `stop` |
 | <a id="serve-registerhint"></a>`registerHint` | the `register` command line printed after the owner setup |
 | <a id="serve-waitforstopmessages"></a>`waitForStopMessages` | the fixed wait at stop for cards edited or posted at the stop and for status deletions, used by the plugin's hub as well |
 | <a id="serve-inferencekey"></a>`inferenceKey` | `SIMPLEX_MCP_INFERENCE_KEY`: visible ASCII characters, otherwise `ExitError` with code 2 |
@@ -270,11 +274,12 @@ Hooks are bound in [`startAgent`](../src/serve.ts), where `actions` is created: 
 | `qrCodeText` | the function of [`qr.ts`](../src/qr.ts), exported from `control.ts` as in 0.2 |
 | <a id="control-controlcommands"></a>`controlCommands` | the command menu |
 | <a id="control-fulldelete"></a>`fullDelete`, `commandsReply`, `secretsOff`, `secretUsage` | the full deletion preference of the group profile; the commands reply; the replies of the secret commands without `--secrets-folder` and to an invalid `/secret` |
+| <a id="control-modelcommand"></a>`modelCommand` | the menu entry `/model`, appended with `--models` |
 | <a id="control-standings"></a>`standings` | custom data key and reply words of the approvals of messages and files |
 | <a id="control-helptexts"></a>`helpTexts`, `sessionHelpTexts` | the `/help` text of each topic: the commands for an empty topic, how to use a command for its keyword. `sessionHelpTexts`, for a group of the plugin's session, contains the commands with `/approve N all`, `/revoke TOOL`, `/give` and `/observer` before the line of `/help`; the texts of `approve`, `reject`, `revoke` and `list` with a line on the approvals of tools, before the text of `serve` and, for `list`, after it; the texts of `give` and `observer`; and the text of `help` with the rule of that group. |
 | <a id="control-controldata"></a>`ControlData` | `{control: true, nextAction}` |
 | <a id="control-chatapproval"></a>`ChatApproval` | `{approvedBy, approvedById, approvedAt}` |
-| <a id="control-controloptions"></a>`ControlOptions`, `SessionOptions` | display name, `--owners`, register hint, QR code size and `Secrets` with `--secrets-folder`. For a group of the plugin's session, its approver check, the sessions by number, each with its ID and `Schedules`, the check of `User` and `toolsChanged`, which sends the approved tools to the session, are added. |
+| <a id="control-controloptions"></a>`ControlOptions`, `SessionOptions` | display name, `--owners`, register hint, QR code size, `Secrets` with `--secrets-folder`; with `--models`, the models, their file and the selected model. For a group of the plugin's session, its approver check, the sessions by number, each with its ID and `Schedules`, the check of `User` and `toolsChanged`, which sends the approved tools to the session, are added. |
 | <a id="control-ownerrequest-type"></a>`OwnerRequest` | parsed owner command |
 | <a id="control-control-load"></a>`Control.load` | lost check, group profile with menu and full deletion through `updateProfile`, member list, and schedules of the agent's chats |
 | <a id="control-control-rename"></a>`Control.rename`, `Control.describe`, `updateProfile` | the plugin's group name, and its short description. `updateProfile` makes one profile update at a time, and keeps the custom data in memory. Each update starts from the group's current profile in the chat database, by `updateGroupProfile`. |
@@ -296,6 +301,7 @@ Hooks are bound in [`startAgent`](../src/serve.ts), where `actions` is created: 
 | <a id="control-control-approvedtools"></a>`approvedTools`, `endToolApprovals`, `approveTool`, `revokeTool` | the approvals of tools of a group of the plugin's session, in memory, by tool name, with the approver's name and member ID. `approvedTools` returns those whose approver is an approver now. `approveTool` records the tool of a pending `permission` action, logs, calls `toolsChanged`, approves the action and replies with `/'revoke TOOL'`. `revokeTool` deletes one, logs and calls `toolsChanged`. `endToolApprovals` drops all; it also runs when the session's group is lost. `chatsText` lists the approved tools after the chats, and `setObserver` calls `toolsChanged` after it reads the members again. |
 | <a id="control-control-give"></a>`give`, `setObserver` | `/give CHAT N` and `/observer #G ID` in a group of the plugin's session. At `give`, the entries of CHAT are moved from the session's `Schedules` to those of session N. `setObserver` replies `NAME's role can't be changed.` for a member with status `pending_approval` or `pending_review`. For a member who is neither current nor pending, such as an invited member who has not joined, the reply is `No member ID in this group.` ([`memberCurrentOrPending`](../src/tools.ts)). Only a current member's role is set to `observer`, when the sender's role is admin or owner and not below the member's role. The members are then read again, and the observer's rights are the reply. |
 | <a id="control-control-setsecret"></a>`setSecret`, `removeSecret`, `secretsText` | the secret commands |
+| <a id="control-control-switchmodel"></a>`switchModel` | the owner request `/model`: the replies, the write of the model file, the log line |
 | <a id="control-control-isapprover"></a>`isApprover` | the session's check in a group of the plugin's session; otherwise role `owner`, and the `--owners` list when given |
 | <a id="control-roleorder"></a>`roleOrder`, `roleRank`, `canSend` | the roles of SimpleX from `relay` to `owner`, in the order of the core; a role above `observer` |
 | <a id="control-sessionapproverroles"></a>`sessionApproverRoles`, `rightsText` | `admin` and `owner`, the approvers of a session group. `rightsText` is `NAME is a ROLE and RIGHTS.`, with the rights of the approvers, of the other roles that send, or of an observer. |
@@ -344,6 +350,7 @@ Hooks are bound in [`startAgent`](../src/serve.ts), where `actions` is created: 
 | Symbol | Contents |
 |---|---|
 | <a id="files-secretrecord"></a>`SecretRecord`, `secretName` | `{setBy, setById, setAt}` of a secret; `^[A-Z][A-Z0-9_]{0,63}$` |
+| <a id="files-modelentry"></a>`ModelEntry`, `ModelOptions`, `ModelSelection` | `{name, model}` of a `--models` item; the items and FILE of `--model-file`; the same with the selected item |
 | <a id="files-createdatafolder"></a>`createDataFolder` | `mkdir -p` mode 0700; `chmod 0700` except on Windows |
 | <a id="files-acquirelock"></a>`acquireLock`, `releaseLock` | `DATA/lock`, or the file of the given name, with the PID. The holder is named in the error by the `user` argument, `server` or `service`. |
 | <a id="files-servertoken"></a>`serverToken` | `DATA/token`, or the file of the given name. An existing file is read, and is made private when the user owns it. A new token is 32 random bytes in base64url, and its file is created as the lock is. |
@@ -355,6 +362,8 @@ Hooks are bound in [`startAgent`](../src/serve.ts), where `actions` is created: 
 | <a id="files-writeserverfile"></a>`writeServerFile`, `readServerFile` | `DATA/server.json` |
 | <a id="files-abortcounter"></a>`abortCounter`, `writeReadableFile` | FILE of `--abort-file`: the count from its first line, or `0` written; the returned function writes the count plus 1, to `FILE.part` with mode 0644, then renamed to FILE, and adds 1 to the count after the write |
 | <a id="files-secrets"></a>`Secrets` | the secrets folder, created with `mkdir -p` mode 0700: `names`, the file names that match `secretName`, sorted; `records`, read from `DATA/secrets.json`; `set`, the value written to `NAME.part`, renamed to `NAME`, and its record; `remove`, for a name among `names` only |
+| <a id="files-modelatstart"></a>`modelAtStart` | the item whose PROVIDER/MODEL equals the first line of FILE; otherwise the first item, written to FILE |
+| <a id="files-writemodelfile"></a>`writeModelFile` | PROVIDER/MODEL and a newline to `FILE.part`, mode 0644, set again except on Windows; then renamed to FILE |
 
 ### [2.9 `register.ts`](../src/register.ts)
 
@@ -592,6 +601,8 @@ Scheduled prompts of the agent's chats.
 | Schedules and due prompts | [`Schedules.chats`](../src/schedule.ts), per chat reference: the entries, each with at most one due prompt | `set` at load, `/schedule`, `/unschedule`, `/give` and `leaveChat`; `markDue`; `take` | timer, `receive` |
 | Schedule listeners | [`Schedules.listeners`](../src/schedule.ts), wake callbacks per chat reference | `listen`, from `receive` | `markDue` |
 | Mode, expiry, owners list, stop wait, inference URL, abort file | `ServeOptions` of the run. The mode is kept in `Actions.mode` and in each action as well, [`ActionRecord.mode`](../src/actions.ts). | CLI | all modules |
+| Selected model | [`ControlOptions.model.selected`](../src/control.ts) | [`modelAtStart`](../src/files.ts), [`switchModel`](../src/control.ts) | `/model` |
+| Mode, expiry, owners list, stop wait, models and their file | `ServeOptions` of the run. The mode is kept in `Actions.mode` and in each action as well, [`ActionRecord.mode`](../src/actions.ts). | CLI | all modules |
 
 ### 3.2 Chat database custom data
 
@@ -626,6 +637,7 @@ The profile, chats, items, members and file transfers are stored by the core in 
 | `DATA/secrets.json` | `{NAME: {setBy, setById, setAt}}`, the records of the secrets | 0600, set again at every write except on Windows | `/secret`, `/unsecret` ([`Secrets.set`, `remove`](../src/files.ts)) | `/secrets` |
 | `SECRETS/` | the folder of `--secrets-folder` | 0700 when the server creates it; the mode of an existing folder is kept | every start with `--secrets-folder` ([`startAgent`](../src/serve.ts), the constructor of [`Secrets`](../src/files.ts)) | |
 | `SECRETS/NAME` | the value of secret NAME, as sent, without a newline | 0600, set again at every write except on Windows | `/secret`, through `SECRETS/NAME.part` ([`Secrets.set`](../src/files.ts)); deleted by `/unsecret` ([`Secrets.remove`](../src/files.ts)) | commands of the agent; the opencode plugin |
+| FILE of `--model-file`, outside `DATA/` | PROVIDER/MODEL of the selected model and a newline | 0644, set again at every write except on Windows | at start when its first line is no listed PROVIDER/MODEL, and at each switch; written to `FILE.part`, then renamed ([`modelAtStart`, `writeModelFile`](../src/files.ts), [`switchModel`](../src/control.ts)) | `modelAtStart`; the script that runs the agent in opencode |
 
 The core library is downloaded once into `CACHE/core-7.1.3.0/sqlite`, and the Node.js add-on into `CACHE/nodejs-addon-cce06d8/`, each with a `Downloading ...` line on stderr. CACHE is `$XDG_CACHE_HOME/simplex-chat` or `~/.cache/simplex-chat`; on macOS `~/Library/Caches/simplex-chat`; on Windows `%LOCALAPPDATA%\simplex-chat` ([`cacheRoot`, `resolveLibsDir`, `resolveAddonPath`, `installLibs`, `installAddon`](../../simplex-chat-nodejs/src/libs.ts)).
 
@@ -639,6 +651,9 @@ The core library is downloaded once into `CACHE/core-7.1.3.0/sqlite`, and the No
 2. libsimplex for SQLite is loaded by `ChatApi.init`, and the databases are migrated with confirmation `yesUp` ([`startServer`](../src/serve.ts), [`ChatApi.init`](../../simplex-chat-nodejs/src/api.ts)).
 3. Three log lines: version and NAME, data folder, mode; with `--inference`, then `Inference endpoint: URL`; with `--audio`, then URL and models ([`startServer`](../src/serve.ts)).
 3. Three log lines: version, with the commit of the build when `dist/commit.txt` exists, and NAME; data folder; mode ([`startServer`, `fullVersion`](../src/serve.ts)).
+1. Data folder, lock, token and headers file are prepared; with `--models`, FILE is read, and the first model is written to it when its first line is no listed PROVIDER/MODEL ([`startServer`](../src/serve.ts), [`modelAtStart`](../src/files.ts)).
+2. libsimplex for SQLite is loaded by `ChatApi.init`, and the databases are migrated with confirmation `yesUp` ([`startServer`](../src/serve.ts), [`ChatApi.init`](../../simplex-chat-nodejs/src/api.ts)).
+3. Three log lines: version and NAME, data folder, mode; with `--models`, a fourth with the selected model and FILE ([`startServer`](../src/serve.ts)).
 4. The active user is read, or created with display name `--display-name` or NAME, empty full name and peer type `agent` ([`startAgent`](../src/serve.ts)).
 3. Three log lines: version and NAME, data folder, mode ([`startServer`](../src/serve.ts)).
 4. With `--secrets-folder`, `Secrets` is created, and the folder with it when missing ([`startAgent`](../src/serve.ts)). The active user is read, or created with display name `--display-name` or NAME, empty full name and peer type `agent` ([`startAgent`](../src/serve.ts)).
@@ -657,6 +672,8 @@ The core library is downloaded once into `CACHE/core-7.1.3.0/sqlite`, and the No
 17. Buffered events are replayed, then live events are dispatched ([`startAgent`](../src/serve.ts), [`bufferEvents`](../src/core.ts)).
 10. `Actions`, `ChatItemsWatch`, `AgentTools` and `Control` are created; the counter is taken from the marker ([`startAgent`](../src/serve.ts)).
 11. `Control.load` sets `Actions.lost` for a lost control chat. Otherwise it updates the group name, command menu and full deletion when they differ in the control chat's profile in the chat database, and reads the members ([`Control.load`, `updateProfile`, `updateGroupProfile`, `changeGroupProfile`](../src/control.ts)).
+10. `Actions`, `ChatItemsWatch`, `AgentTools` and `Control` are created; the counter is taken from the marker, and the selected model is passed to `Control` ([`startAgent`](../src/serve.ts)).
+11. `Control.load` sets `Actions.lost` for a lost control chat. Otherwise it updates the group name and command menu, with `/model` appended when `--models` is given, when they differ in the control chat's profile read at the start, as in 0.2, and reads the members ([`Control.load`, `updateProfile`, `changeGroupProfile`](../src/control.ts)).
 12. The HTTP server listens; with the port in use, the process exits with code 1 ([`startAgent`, `listen`](../src/serve.ts)). Until step 14 ends, requests to `/mcp` that pass the token check get 503 with `Retry-After: 1` ([`startHttp`](../src/http.ts), the `started` flag of [`startAgent`](../src/serve.ts)).
 13. `server.json` is written ([`startAgent`](../src/serve.ts)).
 14. The server runs the owner setup, `Control.start`; after an error, HTTP is closed and the error is rethrown ([`startAgent`](../src/serve.ts)).
@@ -665,6 +682,7 @@ The core library is downloaded once into `CACHE/core-7.1.3.0/sqlite`, and the No
 17. Buffered events are replayed, then live events are dispatched ([`startAgent`](../src/serve.ts), [`bufferEvents`](../src/core.ts)).
 
 After an error inside `startAgent` (steps 4-17) the chat is closed; after any error once the lock is taken, the lock is released ([`startServer`](../src/serve.ts)).
+After an error inside `startAgent` (steps 4-16) the chat is closed; after any error once the lock is taken, the lock is released ([`startServer`](../src/serve.ts)). An error reading or writing FILE, such as a missing folder, ends the start in step 1, before the databases are opened.
 
 ### 4.2 Event dispatch
 
@@ -944,6 +962,11 @@ Node limits: `requestTimeout` 0, `timeout` 0, `headersTimeout` 60 s, `keepAliveT
 The server writes the tappable form `/'...'` only in the card's command line ([`commandsLine`](../src/control.ts)), in `/'revoke CHAT'` of standing cards and replies ([`cardText`, `Control.approveChat`](../src/control.ts)), in `/'delete CHAT files'` of the kept-files message ([`Control.leftChatFilesNote`](../src/control.ts)), in `/'unschedule CHAT N'` of the `/schedule` replies ([`Control.addSchedule`](../src/control.ts)), in the `/help` texts ([`helpTexts`, `sessionHelpTexts`](../src/control.ts)), and in `/schedules` lines, where an approver's prompt is shown with its `/'...'` forms ([`Control.schedulesText`](../src/control.ts)).
 The server writes the tappable form `/'...'` only in the card's command line ([`commandsLine`](../src/control.ts)), in `/'revoke CHAT'` of standing cards and replies ([`cardText`, `Control.approveChat`](../src/control.ts)), in `/'delete CHAT files'` of the kept-files message ([`Control.leftChatFilesNote`](../src/control.ts)), and in `/'unsecret NAME'` of the reply to `/secret`, with NAME of capital letters, digits and `_` only ([`setSecret`](../src/control.ts), [`secretName`](../src/files.ts)).
 The server writes the tappable form `/'...'` only in the card's command line ([`commandsLine`](../src/control.ts)), in `/'revoke CHAT'` of standing cards and replies ([`cardText`, `Control.approveChat`](../src/control.ts)), in `/'copies CHAT off'` of standing cards and `/'copies CHAT on'` of the replies to `/copies CHAT off` and `/approve CHAT all` ([`cardText`, `Control.copies`, `approveChat`](../src/control.ts)), and in `/'delete CHAT files'` of the kept-files message ([`Control.leftChatFilesNote`](../src/control.ts)).
+| NAME of `/model NAME` | compared with the names of `--models`; left out of the replies, which contain only names and PROVIDER/MODEL values of `--models` | [`switchModel`](../src/control.ts) |
+| the sender's name in the `/model` log line | folded to one line | [`switchModel`](../src/control.ts) |
+| tool results | returned as data; schema descriptions and instructions mark `text`, `from`, `name`, file names, downloaded files, `description`, `welcome` and `commands` with their labels and params as data, not instructions; the instructions take a chat's messages as prompts only when the user said so in the session, and limit what the agent shares about its user | [`messageSchema`, `commandSchema`, `chatFieldSchemas`, `downloadOutput`, `instructions`](../src/tools.ts) |
+
+The server writes the tappable form `/'...'` only in the card's command line ([`commandsLine`](../src/control.ts)), in `/'revoke CHAT'` of standing cards and replies ([`cardText`, `Control.approveChat`](../src/control.ts)), in `/'delete CHAT files'` of the kept-files message ([`Control.leftChatFilesNote`](../src/control.ts)), and in `/'model NAME'` of the `/model` replies, with NAME of `--models` ([`switchModel`](../src/control.ts)).
 
 ### 6.4 Chat references
 
@@ -969,6 +992,7 @@ The server writes the tappable form `/'...'` only in the card's command line ([`
 | commands run one at a time in arrival order | [`Control.onMessage`](../src/control.ts) |
 | `/approve`, `/reject`, `/receive` and `/forward` need a pending action with a card, and the action's chat when CHAT is given; `/receive` and `/forward` take downloads only, `/approve` the other actions only | [`Control.ownerCommand`](../src/control.ts) |
 | a `groupRcv` text item whose first word is `/secret`, in any letter case, of any sender, in the main scope or a member support chat, is deleted for all members before its command runs, and its reply is a new message without a quote | [`Control.onMessage`](../src/control.ts) |
+| with `/model NAME`, only a model of `--models` is selected, by its NAME, in both modes; the server writes only its PROVIDER/MODEL to FILE | [`ownerRequest`, `switchModel`](../src/control.ts) |
 
 ### 6.6 Files
 
@@ -1055,6 +1079,18 @@ Limits:
 - Values that commands print are sent to the model provider by the MCP host, except for the forms replaced with the opencode plugin ([REFERENCE, Redaction](../REFERENCE.md#redaction)).
 - `send` and `connect` texts are not checked for values; the approval card shows them.
 
+### 6.8 Model file
+
+<a id="model-file"></a>
+
+| Rule | Code |
+|---|---|
+| the folder of FILE is not the data folder, is not inside it and does not contain it; otherwise the CLI exits with code 2 | [`serveOptions`](../src/cli.ts) |
+| `--models` items are checked at start: NAME `^[a-z][a-z0-9-]{0,15}$`, PROVIDER/MODEL `^[A-Za-z0-9][\w.-]{0,31}/[\w.:/+@-]{1,64}$`, the provider without `/` | [`modelList`](../src/cli.ts) |
+| FILE contains only the PROVIDER/MODEL of an item of `--models` and a newline, with mode 0644 | [`modelAtStart`, `writeModelFile`](../src/files.ts), [`switchModel`](../src/control.ts) |
+| FILE is replaced whole: the server writes `FILE.part` in the same folder and renames it to FILE | [`writeModelFile`](../src/files.ts) |
+| at start, the model in the first line of FILE is selected only when it equals a PROVIDER/MODEL of `--models` | [`modelAtStart`](../src/files.ts) |
+
 ---
 
 ## 7. Limits
@@ -1125,6 +1161,7 @@ Limits:
 | schedule tick | each minute boundary | [`minute`, `Schedules.tickAfter`](../src/schedule.ts) |
 | secret name | 1 to 64 characters: a capital letter, then capital letters, digits and `_` | [`secretName`](../src/files.ts) |
 | secret value | 8 characters (code points) or more, one line | [`setSecret`, `parseCommand`](../src/control.ts) |
+| `--models` item | NAME 1 to 16 characters, provider 1 to 32, model 1 to 64 | [`modelList`](../src/cli.ts) |
 
 ---
 

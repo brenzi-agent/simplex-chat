@@ -665,6 +665,8 @@ requests
   secret NAME VALUE
   unsecret NAME
   secrets
+  model
+  model NAME
   give CHAT N         in a plugin session group only
   observer #G ID      in a plugin session group only
 ```
@@ -689,6 +691,7 @@ The server reads commands from members' messages in the main conversation of the
 | any other request | sender not an approver, `--owners` given | `Only the owners listed in --owners approve actions.` | [`Control.ownerCommand`](../src/control.ts) |
 | one-line `/` text outside the requests | any sender | `Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /secret, /unsecret, /secrets. Each card shows its commands.`, as a new message, without a quote, so a mistyped `/secret`, such as `/secrt NAME VALUE`, which is not deleted, leaves no copy of its value in the reply. The reply in a plugin session group is in [4.3](#43-session-groups) | [`commandsReply`, `unknownCommand`, `Control.onMessage`, `ownerCommand`](../src/control.ts) |
 | one-line `/` text outside the requests | any sender | `Commands: /approve, /reject, /receive, /forward, /revoke, /copies, /leave, /delete, /pending, /list. Each card shows its commands.` The reply in a plugin session group is in [4.3](#43-session-groups) | [`commandsReply`, `unknownCommand`, `Control.ownerCommand`](../src/control.ts) |
+| one-line `/` text outside the requests | any sender | `Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /model. Each card shows its commands.` The reply in a plugin session group is in [4.3](#43-session-groups) | [`commandsReply`, `unknownCommand`, `Control.ownerCommand`](../src/control.ts) |
 | any request | sender not an approver, `--owners` absent | `Only owners approve actions.` | [`Control.ownerCommand`](../src/control.ts) |
 | any request | sender not an approver, `--owners` given | `Only the owners listed in --owners approve actions.` | [`Control.ownerCommand`](../src/control.ts) |
 | `approve`, `reject`, `receive`, `forward` with N | action N absent, not `pending`, or without a card | `Action N is not pending.` | [`Control.ownerCommand`](../src/control.ts) |
@@ -732,6 +735,11 @@ The server reads commands from members' messages in the main conversation of the
 | `secrets` | no secrets | `No secrets.` | [`secretsText`](../src/control.ts) |
 | `secrets` | otherwise | one line per name, sorted: `NAME  set by SETTER  YYYY-MM-DD HH:MM UTC`, or `NAME` for a file without a record | [`secretsText`](../src/control.ts) |
 | `list` | otherwise | one line per chat of the 100 most recent: `CHAT  KIND NAME`, then `, approved for this chat by APPROVER`, `, files approved by APPROVER`, `, copies off` in mode `requests` and `, not connected` when applicable, cut to 100 bytes with `…`; then `K older chats are not shown.` (`1 older chat is not shown.`) | [`Control.chatsText`, `copiesOff`](../src/control.ts) |
+| `model`, `model NAME` | server without `--models` | `This server runs without --models.` | [`Control.switchModel`](../src/control.ts) |
+| `model` | otherwise | ``The agent's model is `NAME`: `PROVIDER/MODEL`.``, then one line `/'model NAME'` for each other model, in the order of `--models` | [`Control.switchModel`](../src/control.ts) |
+| `model NAME` | NAME matches no name of `--models`, so a PROVIDER/MODEL value is refused; NAME is left out of the reply | `No such model. /model shows the models.` | [`Control.switchModel`](../src/control.ts) |
+| `model NAME` | NAME is already selected; FILE is not written | ``The agent's model is already `NAME`.`` | [`Control.switchModel`](../src/control.ts) |
+| `model NAME` | accepted, in both modes: FILE is written, NAME is selected, and the change is logged; after a failed write, the selection is kept, no reply is sent, and the error is logged as `control chat command: ERROR` | ``The agent's model is `NAME`: `PROVIDER/MODEL`. The agent restarts with it. /'model PREVIOUS'``, PREVIOUS the model selected before | [`Control.switchModel`, `onMessage`](../src/control.ts), [`writeModelFile`](../src/files.ts) |
 
 KIND is `contact`, `bot`, `agent`, `business`, `group` or `channel` ([`contactKind`, `groupKind`](../src/tools.ts)). WHAT is `connect to SUBJECT`, `send to SUBJECT`, `download NAME from SUBJECT`, `delete SUBJECT` or `leave SUBJECT` ([`summary`](../src/actions.ts)). SIZE is in bytes, KB, MB or GB, by 1000, with one decimal ([`sizeText`](../src/control.ts)). Names are shown by [`safeName`](../src/control.ts).
 
@@ -742,6 +750,8 @@ CRON has 5 fields: minute 0-59, hour 0-23, day of month 1-31, month 1-12 and day
 A schedule is stored in the chat's custom data, key `simplexMcpSchedules`, as an array of `{cron, prompt, by, byId, at}`: the author's display name and member ID, and the creation time in ISO 8601; other keys are kept. Entries of another shape, or with a refused cron, are ignored, and dropped at the next accepted `/schedule` or `/unschedule` of the chat ([`schedulesOf`](../src/control.ts)). A schedule applies in both modes while member `byId` is an approver and the control chat is not lost ([`Schedules.markDue`](../src/schedule.ts), [`Control.isCurrentApprover`](../src/control.ts)); its delivery is described in [Architecture: scheduled prompts](architecture.md#58-scheduled-prompts).
 
 <a id="secrets"></a>SECRETS is the folder of `--secrets-folder`. The secrets are its files whose names have 1 to 64 capital letters, digits and `_`, starting with a letter; a value is written to `NAME.part` and renamed to `NAME`, both mode 0600 ([`secretName`, `Secrets`](../src/files.ts)). The record of a secret in `DATA/secrets.json` is `{setBy, setById, setAt}`: the setter's display name and member ID, and the time. A secret is kept until `unsecret`, also when its setter is no longer an approver. In mode `host`, the secret commands work as in mode `requests`.
+
+The selected model is kept in memory and in FILE, the file of `--model-file`, as PROVIDER/MODEL and a newline; FILE is written as `FILE.part` with mode 0644, then renamed ([`ControlOptions`](../src/control.ts), [`modelAtStart`, `writeModelFile`](../src/files.ts)).
 
 ### 2.2 Cards
 
@@ -839,6 +849,7 @@ ENTRIES: `ID:NAME` of each human, or of each human owner, joined by commas; an e
 | command menu | `/pending` "Pending actions"<br>`/list` "Chats and approvals"<br>`/schedules` "Scheduled prompts"<br>`/leave` "Leave a chat", params `<chat ID>`<br>`/help` "Help"<br>updated at start when it differs | [`controlCommands`, `Control.load`](../src/control.ts) |
 | full deletion | on: the content of a message deleted by the agent is replaced, in the agent's database and in the members' apps; set again at start when it is not on, and at once when an owner's profile update turns it off, queued with the owner commands | [`fullDelete`, `Control.load`, `onGroupUpdated`, `createControlChat`](../src/control.ts), the event handler of [`startAgent`](../src/serve.ts) |
 | command menu | `/pending` "Pending actions"<br>`/list` "Chats and approvals"<br>`/leave` "Leave a chat", params `<chat ID>`<br>`/secrets` "Secrets"<br>updated at start when it differs | [`controlCommands`, `Control.load`](../src/control.ts) |
+| command menu | `/pending` "Pending actions"<br>`/list` "Chats and approvals"<br>`/leave` "Leave a chat", params `<chat ID>`<br>`/model` "The agent's model", with `--models`<br>updated at start when it differs | [`controlCommands`, `modelCommand`, `Control.load`](../src/control.ts) |
 
 ---
 
@@ -880,6 +891,8 @@ With `--inference`, `SIMPLEX_MCP_INFERENCE_KEY` is read before the data folder i
 
 With `--abort-file`, the abort counter is created in `startServer` after the headers files, before `ChatApi.init`: FILE's first line is read, and a first line of 1 to 15 digits is kept as the count; otherwise, also for a missing FILE, `0` and a newline are written. At each `/abort` of [1.11](#111-abort), the count plus 1 is written, and 1 is then added to the count; a failed write leaves the count unchanged. FILE is written through `FILE.part`: the text is written to `FILE.part` with mode 0644, set again by `chmod` except on Windows, and `FILE.part` is renamed to FILE. At a missing folder, a folder at FILE or a refused write during the start, the lock is released, and the process exits with code 1 and `simplex-mcp: ERROR` ([`startServer`](../src/serve.ts), [`abortCounter`, `writeReadableFile`](../src/files.ts), top-level catch of `main` in [`cli.ts`](../src/cli.ts)). The script that reads FILE is described in [Reference](../REFERENCE.md#abort).
 | `--secrets-folder` | folder | absent | resolved to an absolute path; refused when it is the data folder, inside it, or contains it, compared as resolved paths; created at start with mode 0700 when missing; absent: the secret commands are off | [`serveOptions`](../src/cli.ts), [`startAgent`](../src/serve.ts), the constructor of [`Secrets`](../src/files.ts) |
+| `--models` | `NAME=PROVIDER/MODEL,...` | absent | split at each comma; each item matches `^([a-z][a-z0-9-]{0,15})=([A-Za-z0-9][\w.-]{0,31}/[\w.:/+@-]{1,64})$`; names unique, PROVIDER/MODEL values unique; the first item is the default; only with `--model-file` | [`serveOptions`, `modelList`](../src/cli.ts) |
+| `--model-file` | file | absent | resolved to an absolute path; only with `--models`; its folder is not the data folder, not inside it, and does not contain it | [`serveOptions`](../src/cli.ts) |
 
 ### 3.2 `register`
 
@@ -935,6 +948,7 @@ Status hooks, written after `claude mcp add-json` succeeds ([`register`, `status
 | 2 | `--expire: hours from 1 to 23 expected, got VALUE` | [`serveOptions`, `integer`](../src/cli.ts) |
 | 2 | `--stop-wait: seconds from 0 to 60 expected, got VALUE` | [`serveOptions`, `integer`](../src/cli.ts) |
 | 2 | `--port: a port from 1 to 65535 expected, got VALUE` | [`serveOptions`, `integer`](../src/cli.ts) |
+| 2 | `--models: NAME=PROVIDER/MODEL,... expected, got VALUE` | [`modelList`](../src/cli.ts) |
 | 2 | `--reset-owners takes --owners without a list: member IDs change in a new agent control chat.` | [`serveOptions`](../src/cli.ts) |
 | 2 | `--inference: an http or https URL without user name and password expected, got VALUE` | [`inferenceUrl`](../src/cli.ts) |
 | 2 | `--inference: status messages are shown only in mode requests.` | [`serveOptions`](../src/cli.ts) |
@@ -942,6 +956,8 @@ Status hooks, written after `claude mcp add-json` succeeds ([`register`, `status
 | 2 | `--abort-file: a file in a folder disjoint from the data folder expected, got FILE` | [`serveOptions`](../src/cli.ts) |
 | 2 | `SIMPLEX_MCP_INFERENCE_KEY: visible ASCII characters expected.`, with `--inference`, for a set key, empty or with a character outside 0x21 to 0x7e, before the data folder is prepared | [`startServer`, `inferenceKey`](../src/serve.ts) |
 | 2 | `--secrets-folder: a folder disjoint from the data folder expected, got DIR` | [`serveOptions`](../src/cli.ts) |
+| 2 | `--models and --model-file: both expected.` | [`serveOptions`](../src/cli.ts) |
+| 2 | `--model-file: a file in a folder disjoint from the data folder expected, got FILE` | [`serveOptions`](../src/cli.ts) |
 | 2 | `--owners: member ENTRY is not in the agent control chat. Start with --reset-owners --owners, or use the IDs of current members.` | [`Control.startListed`](../src/control.ts) |
 | 1 | `Another server uses DATA (PID N). If no server runs, remove DATA/lock.` | [`acquireLock`, `lockedError`](../src/files.ts) |
 | 1 | `Port PORT is in use. Start with --port N.` | [`listen`](../src/serve.ts) |
@@ -950,6 +966,7 @@ Status hooks, written after `claude mcp add-json` succeeds ([`register`, `status
 | 1 | `claude mcp add-json failed: STDERR` | [`register`](../src/register.ts) |
 | 1 | `Added to Claude Code: scope SCOPE, server simplex-NAME. FILE is not a valid settings file; add these status hooks to it: {"hooks":HOOKS}`, when FILE is not a JSON object, its `hooks` is other than an object or `null`, or the value of an event of [3.2](#32-register) is not an array; the entry is added, and FILE is left unchanged | [`register`, `withStatusHooks`](../src/register.ts) |
 | 1 | `simplex-mcp: ERROR` for other errors, `stop: ERROR` for a failed stop | top-level catch of `main` in [`cli.ts`](../src/cli.ts), [`serve`](../src/serve.ts) |
+| 1 | `simplex-mcp: ERROR` for other errors, `stop: ERROR` for a failed stop; an error reading or writing FILE at start, such as a missing folder, ends the start before `ChatApi.init` with this line | top-level catch of `main` in [`cli.ts`](../src/cli.ts), [`serve`, `startServer`](../src/serve.ts) |
 
 LOCATION is `"mcpServers"` for scope `user`, and `"projects" > "PROJECT" > "mcpServers"` for scope `local` ([`scopeLocations`](../src/register.ts)).
 
@@ -963,6 +980,7 @@ stdout ([`log`](../src/log.ts)):
 |---|---|---|
 | start | `SimpleX MCP server VERSION, agent "NAME"`<br>`Data folder: DATA`<br>`Approval mode: MODE`<br>`Inference endpoint: URL` with `--inference`<br>with `--audio`: `Audio: URL, speech-to-text STT, text-to-speech TTS`, with `, voice VOICE` | [`startServer`](../src/serve.ts) |
 | start | `SimpleX MCP server VERSION, agent "NAME"`, VERSION the package version, followed by ` (COMMIT)` when `commit.txt` is next to the module, `dist/commit.txt` in the build, COMMIT its content trimmed; `dist/commit.txt` is written by the `prepack` script with the output of `git rev-parse --short=10 HEAD`, and deleted by `postpack`<br>`Data folder: DATA`<br>`Approval mode: MODE` | [`startServer`, `fullVersion`, `versionWithCommit`](../src/serve.ts), [`prepack`, `postpack`](../package.json) |
+| start | `SimpleX MCP server VERSION, agent "NAME"`<br>`Data folder: DATA`<br>`Approval mode: MODE`<br>with `--models`: `Model: NAME (PROVIDER/MODEL), in FILE` | [`startServer`](../src/serve.ts) |
 | control chat created | `Agent control chat "DISPLAY" created.` | [`createControlChat`](../src/control.ts) |
 | link opened | `Join the agent control chat in the SimpleX app. The link works once:`<br>QR code<br>link<br>small QR code: `If the QR code does not scan, restart with --qr-code large, or paste the link into the app.`<br>role line | [`Control.openLink`](../src/control.ts) |
 | listening | `Listening on http://127.0.0.1:PORT/mcp` | [`startAgent`](../src/serve.ts) |
@@ -985,6 +1003,7 @@ stdout ([`log`](../src/log.ts)):
 | scheduled prompt due | `Scheduled prompt N of CHAT is due.` | [`Schedules.markDue`](../src/schedule.ts) |
 | `/secret NAME VALUE` accepted | `Secret NAME set by NAME.`, without the value | [`setSecret`](../src/control.ts) |
 | `/unsecret NAME` accepted | `Secret NAME removed by NAME.` | [`removeSecret`](../src/control.ts) |
+| `/model NAME` | `Model set to NAME (PROVIDER/MODEL) by OWNER.`, OWNER folded to one line | [`Control.switchModel`](../src/control.ts) |
 | refused file, file not sent | as in [2.3](#23-other-posts), names and paths on one line | [`Control.refusedFile`, `fileNotSent`](../src/control.ts) |
 | stop | `Cancelled K action.` or `Cancelled K actions.` when K > 0<br>`Stopping: sending PARTS, up to S s. Ctrl-C to stop now.` when PARTS is not empty and S > 0; PARTS is `K cancelled card(s)` when cards were edited or posted and the control chat is not lost, and `M status deletion(s)` when status messages had a render, joined by ` and `<br>`Stopped.` | `stop` in [`startAgent`](../src/serve.ts), [`waitForStopMessages`](../src/serve.ts) |
 | membership messages | see [2.4](#24-membership-messages) | |

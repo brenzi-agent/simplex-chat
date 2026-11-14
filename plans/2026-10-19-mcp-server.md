@@ -4,6 +4,7 @@ Status: draft · 2026-10-17, files and leave 2026-10-30 (`plans/2026-10-30-mcp-f
 Status: draft · 2026-10-17, files and leave 2026-10-30 (`plans/2026-10-30-mcp-files-and-leave.md`), secrets 2026-11-12 (`plans/2026-11-12-mcp-secrets.md`) · person-facing manual: `REFERENCE.md`, the plugin in short in `README.md`. Code references: master `139ce5f8c` (`/code/simplex-chat-6`), unless marked `9711dcfc9` (core 7.1.0.11); `simplex-chat` 7.1.0-beta.10.2 loads core 7.1.0.20. Pending decisions: section Open.
 Status: draft · 2026-10-17, files and leave 2026-10-30 (`plans/2026-10-30-mcp-files-and-leave.md`), history 2026-11-12 (`plans/2026-11-12-mcp-history.md`) · person-facing manual: `REFERENCE.md`, the plugin in short in `README.md`. Code references: master `139ce5f8c` (`/code/simplex-chat-6`), unless marked `9711dcfc9` (core 7.1.0.11); `simplex-chat` 7.1.0-beta.10.2 loads core 7.1.0.20. Pending decisions: section Open.
 Status: draft · 2026-10-17, files and leave 2026-10-30 (`plans/2026-10-30-mcp-files-and-leave.md`), restart notice 2026-11-12 (`plans/2026-11-12-mcp-restart-notice.md`) · person-facing manual: `REFERENCE.md`, the plugin in short in `README.md`. Code references: master `139ce5f8c` (`/code/simplex-chat-6`), unless marked `9711dcfc9` (core 7.1.0.11); `simplex-chat` 7.1.0-beta.10.2 loads core 7.1.0.20. Pending decisions: section Open.
+Status: draft · 2026-10-17, files and leave 2026-10-30 (`plans/2026-10-30-mcp-files-and-leave.md`), the agent's model 2026-11-12 (`plans/2026-11-12-mcp-model.md`) · person-facing manual: `REFERENCE.md`, the plugin in short in `README.md`. Code references: master `139ce5f8c` (`/code/simplex-chat-6`), unless marked `9711dcfc9` (core 7.1.0.11); `simplex-chat` 7.1.0-beta.10.2 loads core 7.1.0.20. Pending decisions: section Open.
 
 ## Scope
 
@@ -168,6 +169,7 @@ files.ts      token, headers.json, hook-headers, server.json, lock
 register.ts   register command: the MCP entry and the status hooks
 http.ts       listener, token, /mcp, the SDK handler with its Origin and Host checks
 files.ts      token, headers.json, server.json, lock, secrets
+files.ts      token, headers.json, server.json, lock, the model file
 register.ts   register command
 log.ts        stdout log lines, stderr errors
 ```
@@ -240,6 +242,7 @@ statuses      memory: at most one status message per chat; leftovers of a crash 
 activity      memory: the Claude Code activity of at most 16 agent sessions, from the status hooks
 transcribing  memory: the voice files downloaded and transcribed at arrival, at most 20; their messages are held
 secrets       files: SECRETS/NAME and DIR/secrets.json, until /unsecret NAME
+selected model FILE of --model-file: PROVIDER/MODEL and a newline, mode 0644, read at start; memory: the selected item
 ```
 
 - Writes of the custom data run one at a time, through one queue in the server, in counter order: the library runs each command in a worker thread (`simplex-chat/cpp/simplex.cc:46-54`), and `APISetGroupCustomData` takes no lock (`Commands.hs:1668-1672`).
@@ -262,6 +265,8 @@ serve NAME:
 --inference       URL of llama-swap or llama-server    absent
 --audio           URL,STT,TTS[,VOICE]                  absent
 --secrets-folder  folder                               absent
+--models          NAME=PROVIDER/MODEL[,...]            absent
+--model-file      file                                 absent
 register NAME:
 --scope           user | local                         user
 --data            folder                               ~/.simplex-mcp/NAME
@@ -277,6 +282,8 @@ register NAME:
 - `--audio`: URL is the base URL of an OpenAI-compatible audio API, STT its speech-to-text model, TTS its text-to-speech model and VOICE the voice of TTS. The value is 3 or 4 non-empty parts, separated by commas; URL is `http` or `https` without a user name or password, and its trailing slashes are removed. Without `--audio`, voice messages are not transcribed, and `voice` is absent from the input of `send` (section send).
 - `--stop-wait`: at stop, after the cards of pending and performing actions are edited or posted, the server waits this many seconds before it closes the chat, so that the agent sends those messages; 0 does not wait (section Start and shutdown).
 - `--secrets-folder SECRETS`: the folder of the secrets that owners set (section Secrets), resolved to an absolute path. It is compared with the data folder as resolved paths, symbolic links not followed. Without it, the secret commands get `Secrets are off: the server runs without --secrets-folder.`, and `list` leaves out `secrets`.
+- `--models` and `--model-file` are given together, for an agent that a script runs in opencode (section Commands, `/model`). Each item of `--models` matches `^([a-z][a-z0-9-]{0,15})=([A-Za-z0-9][\w.-]{0,31}/[\w.:/+@-]{1,64})$`; names are unique, and so are PROVIDER/MODEL values; the first item is the default.
+- `--model-file` is resolved to an absolute path. Its folder is not the data folder, not inside it, and does not contain it.
 
 Rejected arguments, exit code 2:
 
@@ -293,6 +300,11 @@ NAME not ^[a-z0-9](-?[a-z0-9])*-?$,   NAME: 1 to 32 lowercase letters, digits an
   or password
 --inference with --approve host       --inference: status messages are shown only in mode requests.
 --audio value of another form         --audio: URL,STT,TTS or URL,STT,TTS,VOICE with an http or https URL expected, got <value>
+--models item not matching, or a      --models: NAME=PROVIDER/MODEL,... expected, got <value>
+  repeated name or PROVIDER/MODEL
+--models or --model-file alone        --models and --model-file: both expected.
+--model-file folder not disjoint      --model-file: a file in a folder disjoint from the data folder expected, got <file>
+  from the data folder
 ```
 
 - With `--inference`, the server exits with code 2 before the data folder is created when `SIMPLEX_MCP_INFERENCE_KEY` is empty or has characters other than visible ASCII (0x21-0x7e): `SIMPLEX_MCP_INFERENCE_KEY: visible ASCII characters expected.`
@@ -396,6 +408,8 @@ owner's /schedule               Schedule 1 of #3 added by Alice: 0 7 * * 1-5.
 owner's /unschedule             Schedule 1 of #3 removed by Alice.
 scheduled prompt due            Scheduled prompt 1 of #3 is due.
 restart notice not posted       restart notice to #9: <error>   (stderr, per chat) | restart notice: <error>   (stderr, the chats not read; no notice)
+start, --models                 Model: gemma (llama-swap/gemma-4-26b), in /run/agent-model/model
+owner's /model NAME             Model set to coder (llama-swap/qwen3-coder-next) by Alice.
 owner added, --owners LIST      Bob (member 7) is now an owner and can't approve actions yet. Restart the server with --owners 3:Alice,7:Bob
 owner gone, --owners LIST       Alice (member 3) is no longer an owner. Restart the server with --owners 7:Bob   (the human owners remaining)
 no human owner remains          Alice (member 3) is no longer an owner. No owners remain: restart the server with --reset-owners --owners
@@ -552,6 +566,7 @@ host, interrupted   the request's lines except the commands line + "Performed wi
 
 The group's command menu has `/pending`, `/list`, `/schedules`, `/leave` and `/help`; the cards show the others, except the schedule commands (section Schedules).
 The group's command menu has `/pending`, `/list`, `/leave` and `/secrets`; the cards show the action commands, and the reply to `/secret` shows `/unsecret`.
+The group's command menu has `/pending`, `/list` and `/leave`, and `/model` with `--models`; the cards show the others.
 
 ```
 menu entry   keyword   label                 params      tapped
@@ -561,6 +576,7 @@ menu entry   keyword   label                 params      tapped
 /leave       leave     Leave a chat          <chat ID>   "/leave <chat ID>" in the entry field, the cursor at its end
 /help        help      Help                  none        sent
 /secrets     secrets   Secrets               none        sent
+/model       model     The agent's model     none        sent; the entry only with --models
 ```
 
 - The apps put "/keyword params" into the entry field for a command with params, and send "/keyword" for one without (`CommandsMenuView.kt:154-159`, `CommandsMenuView.swift:118-124`).
@@ -591,6 +607,8 @@ command             result
 /secret NAME VALUE  VALUE written to SECRETS/NAME, in place of an earlier value; its record to DIR/secrets.json (section Secrets)
 /unsecret NAME      SECRETS/NAME and its record deleted
 /secrets            one line per secret, sorted by name: "GITHUB_TOKEN  set by Alice  2026-11-12 10:00 UTC"; "GITHUB_TOKEN" for a file without a record; "No secrets." when none
+/model              the selected model, then one command per other model of --models
+/model NAME         model NAME of --models selected: the model file written, the change logged
 ```
 
 `/list`:
@@ -664,6 +682,14 @@ NAME or VALUE invalid
 /secrets, no secrets                        No secrets.
 other one-line text starting with "/"       Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /secret, /unsecret, /secrets. Each card shows its commands.   (a new message, without a quote)
 other one-line text starting with "/"       Commands: /approve, /reject, /receive, /forward, /revoke, /copies, /leave, /delete, /pending, /list. Each card shows its commands.
+/model | /model NAME, no --models           This server runs without --models.
+/model                                      The agent's model is `gemma`: `llama-swap/gemma-4-26b`.
+                                            /'model coder'
+                                            /'model large'
+/model NAME                                 The agent's model is `coder`: `llama-swap/qwen3-coder-next`. The agent restarts with it. /'model gemma'
+/model NAME, NAME already selected          The agent's model is already `gemma`.
+/model NAME, NAME not in --models           No such model. /model shows the models.
+other one-line text starting with "/"       Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /model. Each card shows its commands.
 ```
 
 After `/leave CHAT`, after its reply, and after the outcome of a leave action in state done, when the folder of CHAT has files:
@@ -718,6 +744,7 @@ A-B/S    every S-th value from A to B
 - A chat has at most 10 schedules. N is the position in the chat's list: `/unschedule` renumbers the later ones, and their due prompts are kept.
 - Schedules are stored in the chat's custom data, its other keys kept, and are deleted with the chat by `leave` and `/leave`. Entries of another form, or with a CRON that is not valid, are left out, and dropped at the next write of the chat's schedules.
 - The schedule commands apply in both modes. `/schedule` and `/unschedule` are logged, with names on one line.
+- `/model` applies in both modes. NAME is compared with the names of `--models`, so a PROVIDER/MODEL value is refused; NAME is left out of the refusal. The command at the end of a switch reply selects the previous model. After a failed write of the model file, the selection is kept, no reply is sent, and the error is logged as `control chat command: <error>`.
 
 ### Membership messages
 
@@ -1374,6 +1401,8 @@ serve(NAME, options):
   check options
   --inference: SIMPLEX_MCP_INFERENCE_KEY empty, or with characters other than visible ASCII: exit 2 "SIMPLEX_MCP_INFERENCE_KEY: visible ASCII characters expected."
   create DIR, mode 0700 (set again when DIR exists, except on Windows); DIR/lock created exclusively, or exit 1 when its PID runs; token = DIR/token, created when missing or with --new-token; DIR/headers.json and DIR/hook-headers written with the token
+  create DIR, mode 0700 (set again when DIR exists, except on Windows); DIR/lock created exclusively, or exit 1 when its PID runs; token = DIR/token, created when missing or with --new-token; DIR/headers.json written with the token
+  --models: the item whose PROVIDER/MODEL is the first line of FILE is selected; none: the first item, written to FILE as at /model NAME; an error: DIR/lock removed, exit 1
   chat = ChatApi.init({type: "sqlite", filePrefix: DIR/simplex})
   --secrets-folder SECRETS: mkdir -p SECRETS, mode 0700, when missing
   profile = the user, or created: /_create user {profile: {displayName: <--display-name or NAME>, fullName: "", peerType: agent}, pastTimestamp: false}
@@ -1388,6 +1417,7 @@ serve(NAME, options):
     /_delete #group full notify=on; group = createControlChat(nextAction)
   group.membership not owner, or memberStatus not creator, connected or complete: lost = true; log "The agent lost its control chat. Restart the server with --reset-owners."
   lost unset: stored = /_get chat #group count=0; stored.groupProfile.displayName differs from the profile's, its commands from the menu of createControlChat, or its fullDelete is not on: /_group_profile #group {the stored group profile with that displayName, menu and fullDelete on}   # APIUpdateGroupProfile, parser Commands.hs:6534
+  lost unset, group.groupProfile.displayName differs from the profile's, or its commands from the menu of createControlChat with /model appended under --models: /_group_profile #group {the group profile with that displayName and menu}   # APIUpdateGroupProfile, parser Commands.hs:6534
   members = /_members #group, so approvers are known before the first call
   lost unset: schedules = the valid entries of simplexMcpSchedules in the custom data of each chat of list(), in one /_get chats read
   each chat of list() that meets the conditions of status messages: deleteLeftovers(chat), awaited (section Status message); a failed chat list: logged "status messages: <error>"
@@ -1498,6 +1528,7 @@ help TOPIC:       TOPIC = PARAMS without a leading "/" followed by a character o
                   otherwise "No help for that. /help lists the commands."
 not one of the commands below: post "Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /secret, /unsecret, /secrets. Each card shows its commands." as a new message, without a quote
 not one of the commands below: reply "Commands: /approve, /reject, /receive, /forward, /revoke, /copies, /leave, /delete, /pending, /list. Each card shows its commands."
+not one of the commands below: reply "Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /model. Each card shows its commands."
 sender not an approver: reply "Only owners approve actions." (--owners: "Only the owners listed in --owners approve actions.")
 approve | reject | receive | forward [CHAT] N, receive CHAT N all, action N not pending in memory, or its card unset: reply "Action N is not pending."
 the same with CHAT, action N a connect or for another chat: reply "Action N is not for CHAT."
@@ -1540,6 +1571,11 @@ secret NAME VALUE: no --secrets-folder: reply "Secrets are off: the server runs 
 unsecret NAME:    no --secrets-folder: the off reply; NAME not among the secrets: reply "No such secret. /secrets lists them.";
                   otherwise SECRETS/NAME deleted and its record removed from DIR/secrets.json; log "Secret NAME removed by SETTER."; reply "Secret NAME is removed."
 secrets:          no --secrets-folder: the off reply; otherwise one line per secret: "NAME  set by SETTER  YYYY-MM-DD HH:MM UTC", or "NAME" without a record; "No secrets." when none
+model [NAME]:     no --models: reply "This server runs without --models."
+                  no NAME: reply "The agent's model is `NAME`: `PROVIDER/MODEL`." of the selected item, then a line /'model NAME' per other item, in the order of --models
+                  NAME not a name of --models: reply "No such model. /model shows the models."; NAME already selected: reply "The agent's model is already `NAME`."
+                  otherwise: write PROVIDER/MODEL and "\n" to FILE.part, mode 0644 (set again except on Windows), rename it to FILE; select NAME; log "Model set to NAME (PROVIDER/MODEL) by SENDER.", SENDER on one line;
+                  reply "The agent's model is `NAME`: `PROVIDER/MODEL`. The agent restarts with it. /'model PREVIOUS'"
 ```
 
 - Owner commands run one at a time, in arrival order: a command awaits the custom data write of the one before it.
@@ -2399,6 +2435,8 @@ commands    /approve [CHAT] N, /reject [CHAT] N, another chat, /approve CHAT all
 options     defaults, ranges, --stop-wait from 0 to 60, NAME, --display-name at the first and a later start, --owners with and without a list, names with commas, rejected arguments, --help text
 commands    /approve [CHAT] N, /reject [CHAT] N, another chat, /approve CHAT all, /revoke, /pending, /list, unknown, multi-line, non-command text, a number from an earlier run; /list of 100 chats with cut lines and the older count; chat references over 15 digits; names with line breaks and escape sequences; a listed owner by the name on one line; the restart command as code; card size at 15000 bytes, with the current approvers' longest name; a connect refused for its message, its link texts cut to fit; mode host without approvals, /approve CHAT all refused; the wait at stop with cancelled cards, skipped without them, and ended by a second signal; /receive CHAT N all and /receive CHAT off beside the approval of messages; /copies CHAT off and on with /list, no outcome card of a done standing send while off, failed ones posted; /approve of a download and /receive or /forward of other actions refused; /forward with its reply and failure, the file outside the chat's folder; download cards with the preview, resized to fit 15000 bytes; a refused file posted and logged; an image send card with its preview
 commands    /approve [CHAT] N, /reject [CHAT] N, another chat, /approve CHAT all, /revoke, /pending, /list, unknown, multi-line, non-command text, a number from an earlier run; /list of 100 chats with cut lines and the older count; chat references over 15 digits; names with line breaks and escape sequences; a listed owner by the name on one line; the restart command as code; card size at 15000 bytes, with the current approvers' longest name; a connect refused for its message, its link texts cut to fit; mode host without approvals, /approve CHAT all refused; the wait at stop with cancelled cards, skipped without them, and ended by a second signal; /receive CHAT N all and /receive CHAT off beside the approval of messages; /approve of a download and /receive or /forward of other actions refused; /forward with its reply and failure, the file outside the chat's folder; download cards with the preview, resized to fit 15000 bytes; a refused file posted and logged; an image send card with its preview; the restart notice in the agent control chat, then in the approved chats where the agent can post as itself, and not in unapproved, incognito, observer, relay or unconnected chats; in mode host, the agent control chat only; after the loss of the control chat, no notice; a failed post logged and the other chats posted; the version with and without the commit file
+options     defaults, ranges, --stop-wait from 0 to 60, NAME, --display-name at the first and a later start, --owners with and without a list, names with commas, rejected arguments, --help text; --models at the length limits and its refused items, --models and --model-file only together, the model file's folder against the data folder
+commands    /approve [CHAT] N, /reject [CHAT] N, another chat, /approve CHAT all, /revoke, /pending, /list, unknown, multi-line, non-command text, a number from an earlier run; /list of 100 chats with cut lines and the older count; chat references over 15 digits; names with line breaks and escape sequences; a listed owner by the name on one line; the restart command as code; card size at 15000 bytes, with the current approvers' longest name; a connect refused for its message, its link texts cut to fit; mode host without approvals, /approve CHAT all refused; the wait at stop with cancelled cards, skipped without them, and ended by a second signal; /receive CHAT N all and /receive CHAT off beside the approval of messages; /approve of a download and /receive or /forward of other actions refused; /forward with its reply and failure, the file outside the chat's folder; download cards with the preview, resized to fit 15000 bytes; a refused file posted and logged; an image send card with its preview; /model with its replies, the model file and the log line, refused for unlisted names, without --models and for non-approvers, in both modes; the /model menu entry; a start that stops before the chat database when the model file's folder is missing
 actions     every transition; attach rule; open counts; counter written before the card; a failed counter write or card post logged; stop edits pending and performing cards, aborts the performs' signal, and an interrupted perform logs no line; standing approval: performed at once, outcome card posted; 20 pending; 20 performing; decided actions deleted after expires
 cards       every card form and outcome; quoting; names and errors on one line; "as myself" and "incognito"; "where I am incognito"; leave forms; standing form; link texts cut to the bytes left; the reply quote cut by characters; download forms with sizes and the servers line; the attaching line of sends
 messages    message fields; responses with idle and wait; overflow IDs removed at deletion; receive with new messages under a concurrent call, stopping at limit + 1, a store error of a page read as its error; leave of @N and #N, pending membership included; approved in list; all chats in one read; an approval whose approver is no longer one; a group-role failure; a send to an unconnected contact or group refused; reply_to of an item other than a message refused; mentions of equal names refused; the connect wait cap; the connect wait ended by the stop; the file field of each file status and rejected, a forwarded file offered and then received; download: attach, performing at wait, a received file, a forwarded file kept outside the chat's folder and moved there at the approval, failures by events, a files approval, the wait for the file description and its end at wait, unknown servers without passwords and of disabled operators; send with file: the type and preview by extension, the resized copy deleted at sndFileCompleteXFTP and after a failed send, the fixed preview when the core can't resize or ffmpeg is absent, ffmpeg and ffprobe output, refused paths with symbolic links, a file changed after the request; list with the secrets folder and names, without values, and without --secrets-folder; a file of the secrets folder refused, also through a symbolic link
@@ -2407,6 +2445,7 @@ messages    message fields; responses with idle and wait; overflow IDs removed a
 http        401 without token; 403 with another Origin; 404 for other paths and for a request target that is not a URL, the server serving on; 503 with Retry-After until ready; SDK validation errors, receive with history 51 included
 register    entry JSON with headersHelper and no token; timeout from server.json; remove before add; errors; on Windows, claude through cmd.exe after ENOENT, with cmd.exe quoting
 files       lock: exclusive create, a running PID, a stale PID; folder mode at every start; headers.json; file modes set again on existing files; secrets: the folder mode, the file modes, the index, the names, remove of unknown names and ../x
+files       lock: exclusive create, a running PID, a stale PID; folder mode at every start; headers.json; file modes set again on existing files; the model file: one line with mode 0644 through FILE.part, kept at start when listed, otherwise the first model written, a missing folder
 log         every SimpleX error shape worded by the apps, in its JSON shape from @simplex-chat/types; the chain for other errors
 opencode    the plugin: a value replaced raw, URL-encoded, and in base64 and base64url at each byte alignment, Basic authorization included; a longer value before a value it contains; the names the server lists, trailing newlines ignored; a value of fewer than 8 characters refused; the hook on texts, tool inputs, outputs, errors and metadata, the info kept; values of removed and replaced secrets kept, also in a new server instance; a rejection without the folder
 ```
@@ -2541,3 +2580,9 @@ C6      Claude Code closes the request stream when a call times out or its task 
 - Restart notice (`plans/2026-11-12-mcp-restart-notice.md`): at each start the server posts `SimpleX MCP server VERSION (COMMIT) started.` in the agent control chat and in the chats approved for all messages where the agent can post as itself.
 - COMMIT: `git rev-parse --short=10 HEAD`, written to `dist/commit.txt` by `prepack`; without the file, ` (COMMIT)` is left out. The same version is in the start line.
 - The server posts the notice itself, without an action or a card; a failed post is logged, and the server continues the start.
+## Decisions of 2026-11-12
+
+- `/model NAME` selects the agent's model among the items `NAME=PROVIDER/MODEL` of `--models`; approvers send it, in both modes. The plan: `plans/2026-11-12-mcp-model.md`.
+- The file of `--model-file` is the only store of the selection: read at start, written at each switch.
+- The script that runs opencode restarts the agent at once when the file changes, in a new opencode session.
+- The example list is `--models gemma=llama-swap/gemma-4-26b,coder=llama-swap/qwen3-coder-next,large=hosted/large-latest`: two local models through llama-swap, gemma the default, then a hosted model.

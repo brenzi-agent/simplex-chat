@@ -3,6 +3,7 @@ import {homedir} from "os"
 import {dirname, join, resolve, sep} from "path"
 import {Mode} from "./actions"
 import {AudioOptions} from "./audio"
+import {ModelEntry} from "./files"
 import {sessionStart, turn} from "./hook"
 import {ExitError, log, logError} from "./log"
 import {validName} from "./messages"
@@ -57,6 +58,12 @@ serve options:
                          model STT, text-to-speech model TTS, its voice VOICE
   --secrets-folder DIR   folder of the secrets that owners set with /secret,
                          one file per name; disjoint from the data folder
+  --models MODELS        opencode models NAME=PROVIDER/MODEL, comma-separated;
+                         /model NAME selects one in the agent control chat;
+                         the first is the default; requires --model-file
+  --model-file FILE      file with the selected PROVIDER/MODEL for the script
+                         that runs opencode; in a folder disjoint from the
+                         data folder
 
 register options:
   --scope SCOPE          user (default) or local
@@ -101,6 +108,8 @@ function serveOptions(name: string, options: OptionReader, home: string): ServeO
     stopWait: 10,
     dataGiven: false,
   }
+  let models: ModelEntry[] | undefined
+  let modelFile: string | undefined
   for (let option = options.next(); option !== undefined; option = options.next()) {
     switch (option) {
       case "--data":
@@ -146,6 +155,12 @@ function serveOptions(name: string, options: OptionReader, home: string): ServeO
       case "--secrets-folder":
         serve.secrets = resolve(options.value(option))
         break
+      case "--models":
+        models = modelList(options.value(option))
+        break
+      case "--model-file":
+        modelFile = resolve(options.value(option))
+        break
       default:
         throw unknownOption(option)
     }
@@ -160,6 +175,9 @@ function serveOptions(name: string, options: OptionReader, home: string): ServeO
   const within = (folder: string, path: string): boolean => join(path, sep).startsWith(join(folder, sep))
   if (serve.abortFile !== undefined && (within(serve.data, serve.abortFile) || within(dirname(serve.abortFile), serve.data))) throw usageError(`--abort-file: a file in a folder disjoint from the data folder expected, got ${serve.abortFile}`)
   if (serve.secrets !== undefined && (within(serve.data, serve.secrets) || within(serve.secrets, serve.data))) throw usageError(`--secrets-folder: a folder disjoint from the data folder expected, got ${serve.secrets}`)
+  if (models !== undefined && modelFile !== undefined) serve.model = {models, file: modelFile}
+  else if (models !== undefined || modelFile !== undefined) throw usageError("--models and --model-file: both expected.")
+  if (modelFile !== undefined && (within(serve.data, modelFile) || within(dirname(modelFile), serve.data))) throw usageError(`--model-file: a file in a folder disjoint from the data folder expected, got ${modelFile}`)
   return serve
 }
 
@@ -262,6 +280,15 @@ function ownerEntry(entry: string): OwnerEntry {
   const match = /^([1-9]\d*):(.+)$/.exec(entry)
   if (!match) throw usageError(`--owners: ID:NAME expected, got ${entry}`)
   return {memberId: Number(match[1]), name: match[2]}
+}
+
+// spec: spec/architecture.md#cli-modellist
+function modelList(value: string): ModelEntry[] {
+  const matches = value.split(",").map(item => /^([a-z][a-z0-9-]{0,15})=([A-Za-z0-9][\w.-]{0,31}\/[\w.:/+@-]{1,64})$/.exec(item))
+  const names = new Set(matches.map(match => match?.[1]))
+  const values = new Set(matches.map(match => match?.[2]))
+  if (matches.includes(null) || names.size < matches.length || values.size < matches.length) throw usageError(`--models: NAME=PROVIDER/MODEL,... expected, got ${value}`)
+  return matches.map(match => ({name: match![1], model: match![2]}))
 }
 
 // spec: spec/api.md#exit-codes

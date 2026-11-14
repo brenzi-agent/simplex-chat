@@ -1,7 +1,7 @@
 import {CEvt, ChatEvent, T} from "@simplex-chat/types"
 import {api, core} from "simplex-chat"
 import {Action, ActionHooks, Actions, DownloadAction, PermissionAction, Standing, State, Subject, ToolError, hasUnknownServers, leaveVerbs, subjectText, summary} from "./actions"
-import {Secrets, secretName} from "./files"
+import {ModelSelection, Secrets, secretName, writeModelFile} from "./files"
 import {ExitError, chatErrorOf, errorText, fileError, log, logError, oneLine, serverHostname, shellWord} from "./log"
 import {chatNumber, chatRef, chatType, fileContent, isChatRef, utcMinutes, validName, viewName} from "./messages"
 import {linkCommand} from "./owner"
@@ -22,11 +22,13 @@ export const controlCommands: T.ChatBotCommand[] = [
   {type: "command", keyword: "secrets", label: "Secrets"},
   {type: "command", keyword: "help", label: "Help"},
 ]
+// spec: spec/api.md#group-profile
+const modelCommand: T.ChatBotCommand = {type: "command", keyword: "model", label: "The agent's model"}
 
 // spec: spec/api.md#group-profile
 export const fullDelete: T.GroupPreference = {enable: T.GroupFeatureEnabled.On}
 // spec: spec/api.md#control-commands
-const commandsReply = "Commands: /approve, /reject, /receive, /forward, /revoke, /copies, /leave, /delete, /pending, /list, /schedule, /unschedule, /schedules, /secret, /unsecret, /secrets, /help. Each card shows its commands."
+const commandsReply = "Commands: /approve, /reject, /receive, /forward, /revoke, /copies, /leave, /delete, /pending, /list, /model, /schedule, /unschedule, /schedules, /secret, /unsecret, /secrets, /help. Each card shows its commands."
 // spec: spec/api.md#control-commands
 const noHelp = "No help for that. /help lists the commands."
 // spec: spec/api.md#control-commands
@@ -188,6 +190,7 @@ export interface ControlOptions {
   registerHint: string
   qrCode: QrCodeSize
   secrets?: Secrets
+  model?: ModelSelection
 }
 
 // spec: spec/architecture.md#control-controloptions
@@ -226,6 +229,7 @@ type OwnerRequest =
   | {type: "secret"; name: string; value: string}
   | {type: "unsecret"; name: string}
   | {type: "pending" | "list" | "schedules" | "secrets"}
+  | {type: "model"; name?: string}
   | {type: "help"; topic: string}
 
 interface Shown {
@@ -265,9 +269,10 @@ export class Control implements Pick<ActionHooks, "refusal" | "saveCounter" | "p
   // spec: spec/api.md#group-profile
   async load(): Promise<void> {
     if (isLost(this.group)) return this.lose()
-    const {displayName} = this.options
+    const {displayName, model} = this.options
+    const commands = model === undefined ? controlCommands : [...controlCommands, modelCommand]
     await this.updateProfile(profile =>
-      profile.displayName !== displayName || JSON.stringify(profile.groupPreferences?.commands) !== JSON.stringify(controlCommands) || profile.groupPreferences?.fullDelete?.enable !== fullDelete.enable ? {...profile, displayName, groupPreferences: {...profile.groupPreferences, fullDelete, commands: controlCommands}} : undefined,
+      profile.displayName !== displayName || JSON.stringify(profile.groupPreferences?.commands) !== JSON.stringify(commands) || profile.groupPreferences?.fullDelete?.enable !== fullDelete.enable ? {...profile, displayName, groupPreferences: {...profile.groupPreferences, fullDelete, commands}} : undefined,
     )
     await this.refreshMembers()
     for (const {chatInfo} of await this.tools.agentChats()) this.schedules.set(chatRef(chatInfo)!, schedulesOf(customDataOf(chatInfo)))
@@ -475,6 +480,8 @@ export class Control implements Pick<ActionHooks, "refusal" | "saveCounter" | "p
         return this.options.secrets === undefined ? secretsOff : this.removeSecret(this.options.secrets, sender, request.name)
       case "secrets":
         return this.options.secrets === undefined ? secretsOff : this.secretsText(this.options.secrets)
+      case "model":
+        return this.switchModel(sender, request.name)
       case "approve":
       case "reject":
       case "receive":
@@ -675,6 +682,21 @@ export class Control implements Pick<ActionHooks, "refusal" | "saveCounter" | "p
     await this.refreshMembers()
     this.options.session?.toolsChanged()
     return rightsText(name, T.GroupMemberRole.Observer)
+  }
+
+  // spec: spec/api.md#control-commands
+  private switchModel(sender: T.GroupMember, name: string | undefined): string {
+    const {model} = this.options
+    if (model === undefined) return "This server runs without --models."
+    const {models, selected} = model
+    if (name === undefined) return [`The agent's model is ${codeSpan(selected.name)}: ${codeSpan(selected.model)}.`, ...models.filter(entry => entry !== selected).map(entry => `/'model ${entry.name}'`)].join("\n")
+    const requested = models.find(entry => entry.name === name)
+    if (requested === undefined) return "No such model. /model shows the models."
+    if (requested === selected) return `The agent's model is already ${codeSpan(selected.name)}.`
+    writeModelFile(model.file, requested.model)
+    model.selected = requested
+    log(`Model set to ${requested.name} (${requested.model}) by ${oneLine(sender.memberProfile.displayName)}.`)
+    return `The agent's model is ${codeSpan(requested.name)}: ${codeSpan(requested.model)}. The agent restarts with it. /'model ${selected.name}'`
   }
 
   private queueAfterReplies(post: () => Promise<unknown>): void {
@@ -1259,6 +1281,7 @@ function ownerRequest({keyword, params}: Command, session: boolean): OwnerReques
   if (keyword === "secret") return {type: keyword, name: words[0] ?? "", value: params.replace(/^\S*\s*/, "")}
   if (keyword === "unsecret" && words.length === 1) return {type: keyword, name: words[0]}
   if ((keyword === "pending" || keyword === "list" || keyword === "schedules" || keyword === "secrets") && words.length === 0) return {type: keyword}
+  if (keyword === "model" && words.length <= 1) return {type: keyword, name: words.at(0)}
   if (keyword === "help") return {type: keyword, topic: params.replace(/^\/(?=.)/, "")}
   return undefined
 }
