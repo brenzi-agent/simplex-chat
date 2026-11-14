@@ -187,7 +187,7 @@ describe("MCP", () => {
     expect(send._meta).toBeUndefined()
     expect(send.description.split("\n")).toContain("With live: true, in a chat with a person, a group or a business chat that has approved: true in list, text is shown at once in the chat's live status message, and status live is returned without an action. Your next message there without live is sent as a new message, and the status message is then deleted.")
     const receive = result.tools.find(({name}: {name: string}) => name === "receive")
-    expect(Object.keys(receive.inputSchema.properties)).toEqual(["chat", "wait", "limit"])
+    expect(Object.keys(receive.inputSchema.properties)).toEqual(["chat", "wait", "limit", "history"])
     expect(receive.description.split("\n")).toContain("In a chat with a person, a group or a business chat that has approved: true in list, a live status message is shown there from the arrival of a message, while you work, until your next message there or a receive there that waits. In the chat where you receive prompts, send each answer with wait 0 and without live, so the next prompt stays unread for receive, and call receive again only after it. For a step that takes minutes, call send with live: true and a short note in the same response as the step's tool call; the note is shown in the status message.")
   })
 
@@ -202,7 +202,7 @@ describe("MCP", () => {
     await start()
     const {result} = await body(await post(modern("tools/list"), modernHeaders("tools/list")))
     const receive = result.tools.find(({name}: {name: string}) => name === "receive")
-    expect(receive.description.split("\n").at(-1)).toBe("scheduled holds the prompts your owner scheduled for this chat in the agent control chat; handle each as a prompt from your owner and answer in this chat.")
+    expect(receive.description.split("\n")).toContain("scheduled holds the prompts your owner scheduled for this chat in the agent control chat; handle each as a prompt from your owner and answer in this chat.")
     expect(receive.outputSchema.properties.scheduled).toEqual({
       type: "array",
       description: "Prompts your owner scheduled for this chat that are due; present only when one is due.",
@@ -265,6 +265,8 @@ describe("MCP", () => {
     expect(await text({chat: "@4", text: "x", live: "yes"})).toMatch(/data\/live must be boolean$/)
     expect(await text({chat: "@4", text: "x", colour: "red"})).toMatch(/data must NOT have additional properties$/)
     expect(await text({text: "x"})).toMatch(/data must have required property 'chat'$/)
+    const {result} = await body(await post(modern("tools/call", {name: "receive", arguments: {chat: "@4", history: 51}}), modernHeaders("tools/call", "receive")))
+    expect(result).toMatchObject({isError: true, content: [{type: "text", text: "Input validation error: Invalid arguments for tool receive: data/history must be <= 50"}]})
     expect(actions.all()).toHaveLength(0)
   })
 

@@ -333,6 +333,7 @@ Hooks are bound in [`startAgent`](../src/serve.ts), where `actions` is created: 
 | <a id="messages-unreaditems"></a>`unreadItems` | unread items of a chat after its `initial` read, paged until a count of final messages |
 | <a id="messages-reportprogress"></a>`reportProgress`, `nextChange`, `awaitResponses` | waits; the wait of `awaitResponses` ended at idle only when every collected item is final |
 | <a id="messages-duration"></a>`duration` | a time rounded to whole milliseconds: `41 ms`, `2.0 s`, `42 s`, `4 min 12 s`, `1 h 5 min`, for the step lines and the end line of the plugin |
+| <a id="messages-historyitems"></a>`historyItems` | message items of a chat before an item, or at its end, paged; new and live items, and items with `itemDeleted`, left out |
 | <a id="messages-validname"></a>`validName`, `viewName` | display name rules and `@name` form |
 
 ### [2.8 `files.ts`](../src/files.ts)
@@ -1068,9 +1069,11 @@ Limits:
 | `wait` | 0 to 86400 s | [`connectSchema`, `sendSchema`, `receiveSchema`, `downloadSchema`](../src/tools.ts) |
 | `idle` | 1 to 300 s, default 30 | [`connectSchema`, `sendSchema`, `defaultIdle`](../src/tools.ts) |
 | `limit` | 1 to 100, default 50 | [`sendSchema`, `receiveSchema`, `defaultLimit`](../src/tools.ts) |
+| `receive.history` | 1 to 50 | [`receiveSchema`](../src/tools.ts) |
 | `connect` snapshot | last 50 items | [`messagesOnConnect`](../src/tools.ts) |
 | collected items per action or call | 100, then their IDs kept as overflow until deleted | [`maxCollected`, `ChatItemsWatch.collect`](../src/messages.ts) |
 | unread page, leftover status page | 100 items | [`pageSize`](../src/messages.ts), [`Statuses.deleteLeftovers`](../src/status.ts) |
+| unread and history page | 100 items | [`pageSize`](../src/messages.ts) |
 | chat list read | one read of 1000000 chats | [`maxChats`](../src/tools.ts) |
 | `download` wait, default | 60 s | [`downloadWait`](../src/tools.ts) |
 | download check | every 60 s | [`downloadCheck`](../src/tools.ts) |

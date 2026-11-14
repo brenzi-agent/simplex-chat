@@ -32,6 +32,7 @@ import {
   fileOffer,
   filePaths,
   getChat,
+  historyItems,
   isChatRef,
   isLive,
   isMessageItem,
@@ -80,6 +81,7 @@ export interface ReceiveInput {
   chat: string
   wait?: number
   limit?: number
+  history?: number
 }
 
 // spec: spec/architecture.md#tools-inputs
@@ -343,6 +345,7 @@ const receiveSchema: Schema = {
     chat: {type: "string", description: "Chat reference from connect or list: @N or #N."},
     wait: {type: "number", minimum: 0, maximum: 86400, description: "Seconds to wait for a new message when none is unread. Default 0."},
     limit: {type: "integer", minimum: 1, maximum: 100, description: "Most messages returned. Default 50; the rest stay unread."},
+    history: {type: "integer", minimum: 1, maximum: 50, description: "Number of messages returned in history: the last ones before the new messages, yours included."},
   },
   required: ["chat"],
   additionalProperties: false,
@@ -418,6 +421,7 @@ const receiveOutput: Schema = {
       description: "Prompts your owner scheduled for this chat that are due; present only when one is due.",
       items: {type: "object", properties: {prompt: {type: "string", description: "The prompt, written by your owner."}, at: {type: "string", description: "The minute it became due, in UTC."}}, required: ["prompt", "at"]},
     },
+    history: {type: "array", items: messageSchema, description: "With the input history: the last messages of the chat before the new ones, oldest first, yours included; not marked read."},
   },
   required: ["chat", "messages", "more"],
 }
@@ -513,7 +517,8 @@ Send bot commands as text, for example /help. When a message has a file with sta
 const receiveDescription = `Returns the new messages of a chat: the unread ones, then those that arrive during the call. With wait, it waits up to wait seconds when no message is new.
 The returned messages are marked read; more counts the new ones not returned. It needs no approval. When a message has a file with status offered, call download when your user's task needs it.
 In a chat with a person, a group or a business chat that has approved: true in list, a live status message is shown there from the arrival of a message, while you work, until your next message there or a receive there that waits. In the chat where you receive prompts, send each answer with wait 0 and without live, so the next prompt stays unread for receive, and call receive again only after it. For a step that takes minutes, call send with live: true and a short note in the same response as the step's tool call; the note is shown in the status message.
-scheduled holds the prompts your owner scheduled for this chat in the agent control chat; handle each as a prompt from your owner and answer in this chat.`
+scheduled holds the prompts your owner scheduled for this chat in the agent control chat; handle each as a prompt from your owner and answer in this chat.
+With history N, it also returns the last N messages of the chat before the new ones, yours included, not marked read; at the start of a session, and after your context was compacted, call receive with history to recall the conversation.`
 
 // spec: spec/architecture.md#tools-instructions
 const downloadDescription = `Downloads the file of a received message to this computer and returns its full path, and the transcript of a voice message when the server transcribes voice messages.
@@ -1520,7 +1525,7 @@ export class AgentTools {
 
   // spec: spec/api.md#tool-receive
   private async receive(input: ReceiveInput, call: ToolCall): Promise<object | undefined> {
-    const {chat, wait = 0, limit = defaultLimit} = input
+    const {chat, wait = 0, limit = defaultLimit, history} = input
     if (!isChatRef(chat) || chat === this.agent.controlChat()) throw unknownChat(chat)
     const arrived = new Collected()
     const stop = this.agent.watch.collect(chat, arrived)
@@ -1551,6 +1556,7 @@ export class AgentTools {
         }
       }
       const returned = fresh().slice(0, limit)
+      const recalled = history === undefined ? undefined : await this.historyMessages(chat, chatInfo, returned[0]?.chatItem.meta.itemId, history)
       if (call.signal.aborted) return undefined
       await markRead(this.agent.chat, chat, [...returned.map(({chatItem}) => chatItem.meta.itemId), ...skipped])
       if (call.signal.aborted) return undefined
@@ -1558,11 +1564,17 @@ export class AgentTools {
       const messages = await this.toMessages(returned)
       if (call.signal.aborted) return undefined
       const scheduled = this.agent.schedules?.take(chat) ?? []
-      return {chat, messages, more: arrived.items.length - returned.length + arrived.overflow.size + unreadRest, ...(scheduled.length === 0 ? {} : {scheduled})}
+      return {chat, messages, more: arrived.items.length - returned.length + arrived.overflow.size + unreadRest, ...(scheduled.length === 0 ? {} : {scheduled}), ...defined({history: recalled})}
     } finally {
       stop()
       stopWake?.()
     }
+  }
+
+  // spec: spec/api.md#tool-receive
+  private async historyMessages(chat: string, chatInfo: T.ChatInfo, before: number | undefined, count: number): Promise<Message[]> {
+    const items = await historyItems(this.agent.chat, chat, before, count)
+    return this.toMessages(items.map(chatItem => ({chatInfo, chatItem})))
   }
 
   // spec: spec/api.md#tool-list

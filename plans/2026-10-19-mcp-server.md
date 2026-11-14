@@ -2,6 +2,7 @@
 
 Status: draft · 2026-10-17, files and leave 2026-10-30 (`plans/2026-10-30-mcp-files-and-leave.md`), live status 2026-11-10 (`plans/2026-11-10-mcp-live-status.md`), Claude Code activity 2026-11-11 and the status at the arrival of a message 2026-11-12 (`plans/2026-11-11-mcp-live-activity.md`), scheduled prompts 2026-11-11 (`plans/2026-11-11-mcp-schedule.md`), voice messages 2026-11-12 (`plans/2026-11-12-mcp-voice.md`) · person-facing manual: `REFERENCE.md`, the plugin in short in `README.md`. Code references: master `139ce5f8c` (`/code/simplex-chat-6`), unless marked `9711dcfc9` (core 7.1.0.11); in the sections of the status message and the inference endpoint, master `f8776692df`; hook events: the Claude Code hooks reference (code.claude.com/docs/en/hooks.md) of 2026-11-11; `simplex-chat` 7.1.0-beta.10.2 loads core 7.1.0.20. Pending decisions: section Open.
 Status: draft · 2026-10-17, files and leave 2026-10-30 (`plans/2026-10-30-mcp-files-and-leave.md`), secrets 2026-11-12 (`plans/2026-11-12-mcp-secrets.md`) · person-facing manual: `REFERENCE.md`, the plugin in short in `README.md`. Code references: master `139ce5f8c` (`/code/simplex-chat-6`), unless marked `9711dcfc9` (core 7.1.0.11); `simplex-chat` 7.1.0-beta.10.2 loads core 7.1.0.20. Pending decisions: section Open.
+Status: draft · 2026-10-17, files and leave 2026-10-30 (`plans/2026-10-30-mcp-files-and-leave.md`), history 2026-11-12 (`plans/2026-11-12-mcp-history.md`) · person-facing manual: `REFERENCE.md`, the plugin in short in `README.md`. Code references: master `139ce5f8c` (`/code/simplex-chat-6`), unless marked `9711dcfc9` (core 7.1.0.11); `simplex-chat` 7.1.0-beta.10.2 loads core 7.1.0.20. Pending decisions: section Open.
 
 ## Scope
 
@@ -1062,6 +1063,7 @@ input field   type     rule
 chat          string   required; a chat of the agent
 wait          number   optional; seconds to wait when no message is new and no prompt of the chat is due; 0 to 86400; default 0
 limit         number   optional; 1 to 100; default 50
+history       number   optional; 1 to 50; most message items returned in history
 ```
 
 ```
@@ -1070,6 +1072,7 @@ chat          string      always
 messages      Message[]   always; the new messages, up to limit: the unread ones in chat order, then those that arrive during the call
 more          number      always; new messages not returned
 scheduled     array       a prompt of the chat is due; {prompt, at} of each due prompt, in the order of the chat's schedules; at: the minute it was made due, as 2026-11-11 06:00 UTC
+history       Message[]   with history; up to history message items: the last ones before the first of messages, or the last ones of the chat when messages is empty, in chat order; sent items included; new and live items, and items with itemDeleted (deleted, blocked or moderated), left out
 ```
 
 - New: a received message that is unread when the call reads its page, or that arrives during the call. The returned ones are marked read; another call marking one read after this call collected it does not remove it.
@@ -1868,6 +1871,12 @@ receive(input, ctx):
   not aborted, messages not empty and showsStatus by the chat read of the call: start(chat) of the status messages (section Status message)
   not aborted: scheduled = the due prompts of chat, taken
   result {chat, messages, more, scheduled when not empty}
+  messages: new, up to limit; more = the rest + s.chatStats.unreadCount - the rcvNew items of pages (the unread items not read, at least 0)
+  history given: history pages = /_get chat <chat> before=<the first item ID of messages> count=100, or count=100 when messages is empty,
+    then before=<the first item ID of the last page> count=100, while they hold fewer than history message items that are not rcvNew or live and have no itemDeleted, and the last page holds 100
+    history = the last history of those items, in chat order; the agent's own items named as in connect
+  not aborted: /_read chat items <chat> <the IDs of messages and of skipped, joined by ",">, when that list is non-empty
+  result {chat, messages, more, history when given}
 
 list():
   /_get chats <user> pcc=off count=1000000   # parser Commands.hs:6342; count= is ORDER BY chat_ts DESC LIMIT without a time boundary, Store/Messages.hs:884, :995
@@ -2357,6 +2366,8 @@ actions     every transition; attach rule; open counts; counter written before t
 cards       every card form and outcome; quoting; names and errors on one line; "as myself" and "incognito"; "where I am incognito"; leave forms; standing form; link texts cut to the bytes left; the reply quote cut by characters; download forms with sizes and the servers line; the attaching line of sends
 messages    message fields; responses with idle and wait; overflow IDs removed at deletion; receive with new messages under a concurrent call, stopping at limit + 1, a store error of a page read as its error; leave of @N and #N, pending membership included; approved in list; all chats in one read; an approval whose approver is no longer one; a group-role failure; a send to an unconnected contact or group refused; reply_to of an item other than a message refused; mentions of equal names refused; the connect wait cap; the connect wait ended by the stop; the file field of each file status and rejected, a forwarded file offered and then received; download: attach, performing at wait, a received file, a forwarded file kept outside the chat's folder and moved there at the approval, failures by events, a files approval, the wait for the file description and its end at wait, unknown servers without passwords and of disabled operators; send with file: the type and preview by extension, the resized copy deleted at sndFileCompleteXFTP and after a failed send, the fixed preview when the core can't resize or ffmpeg is absent, ffmpeg and ffprobe output, refused paths with symbolic links, a file changed after the request; list with the secrets folder and names, without values, and without --secrets-folder; a file of the secrets folder refused, also through a symbolic link
 http        401 without token; 403 with another Origin; 404 for other paths and for a request target that is not a URL, the server serving on; 503 with Retry-After until ready; SDK validation errors
+messages    message fields; responses with idle and wait; overflow IDs removed at deletion; receive with new messages under a concurrent call, stopping at limit + 1, a store error of a page read as its error; receive with history: its items in order before the returned new ones or at the end, read in pages after the wait, the agent's own under its name or incognito name, new, live and deleted items left out, none marked read, absent without the input; leave of @N and #N, pending membership included; approved in list; all chats in one read; an approval whose approver is no longer one; a group-role failure; a send to an unconnected contact or group refused; reply_to of an item other than a message refused; mentions of equal names refused; the connect wait cap; the connect wait ended by the stop; the file field of each file status and rejected, a forwarded file offered and then received; download: attach, performing at wait, a received file, a forwarded file kept outside the chat's folder and moved there at the approval, failures by events, a files approval, the wait for the file description and its end at wait, unknown servers without passwords and of disabled operators; send with file: the type and preview by extension, the resized copy deleted at sndFileCompleteXFTP and after a failed send, the fixed preview when the core can't resize or ffmpeg is absent, ffmpeg and ffprobe output, refused paths with symbolic links, a file changed after the request
+http        401 without token; 403 with another Origin; 404 for other paths and for a request target that is not a URL, the server serving on; 503 with Retry-After until ready; SDK validation errors, receive with history 51 included
 register    entry JSON with headersHelper and no token; timeout from server.json; remove before add; errors; on Windows, claude through cmd.exe after ENOENT, with cmd.exe quoting
 files       lock: exclusive create, a running PID, a stale PID; folder mode at every start; headers.json; file modes set again on existing files; secrets: the folder mode, the file modes, the index, the names, remove of unknown names and ../x
 log         every SimpleX error shape worded by the apps, in its JSON shape from @simplex-chat/types; the chain for other errors
@@ -2485,3 +2496,6 @@ C6      Claude Code closes the request stream when a call times out or its task 
 - `list` returns the names and the folder, never the values; its description states the use in commands, as `"$(cat FOLDER/NAME)"`.
 - Redaction: an opencode plugin in the package, `opencode/simplex-secrets.ts`, with its install step in the docs. Claude Code: no redaction; the docs state it.
 - `send` and `connect` texts are not checked for values; the approval cards are the control.
+## Decisions of 2026-11-12
+
+- `receive` takes `history`, 1 to 50: the last message items of the chat before the new ones, the agent's own included and named as in `connect`; new and live items, and items with `itemDeleted`, are left out, and history items are not marked read (`plans/2026-11-12-mcp-history.md`).
