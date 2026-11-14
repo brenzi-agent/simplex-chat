@@ -6,9 +6,9 @@ import {api} from "simplex-chat"
 import {Action, Actions, Mode} from "./actions"
 import {Activity} from "./activity"
 import {AudioOptions} from "./audio"
-import {Control, controlDataOf, createControlChat, findControlGroup, hasOutcomeCard, isControlEvent, isGroupMessage, resetControlChat} from "./control"
+import {Control, controlDataOf, createControlChat, findControlGroup, hasOutcomeCard, isControlEvent, resetControlChat} from "./control"
 import {bufferEvents, prepareCore, updatedUser} from "./core"
-import {abortCounter, acquireLock, createDataFolder, releaseLock, serverToken, writeHeadersFile, writeServerFile} from "./files"
+import {Secrets, abortCounter, acquireLock, createDataFolder, releaseLock, serverToken, writeHeadersFile, writeServerFile} from "./files"
 import {startHttp, stopHttp} from "./http"
 import {inferencePoller} from "./inference"
 import {ExitError, log, logError, shellPath} from "./log"
@@ -42,6 +42,7 @@ export interface ServeOptions {
   inference?: string
   abortFile?: string
   audio?: AudioOptions
+  secrets?: string
 }
 
 // spec: spec/architecture.md#serve-runningserver
@@ -103,6 +104,7 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
 // spec: spec/architecture.md#serve-startagent
 async function startAgent(chat: api.ChatApi, options: ServeOptions, token: string, inference: ReturnType<typeof inferencePoller> | undefined, abort: ReturnType<typeof abortCounter> | undefined): Promise<RunningServer> {
   const {name, data, port, approve, expireHours} = options
+  const secrets = options.secrets === undefined ? undefined : new Secrets(options.secrets, join(data, "secrets.json"))
   const created = (await chat.apiGetActiveUser()) ?? (await chat.apiCreateActiveUser({displayName: options.displayName ?? name, fullName: "", peerType: T.ChatPeerType.Agent}))
   await prepareCore(chat, data)
   const events = bufferEvents(chat)
@@ -120,8 +122,8 @@ async function startAgent(chat: api.ChatApi, options: ServeOptions, token: strin
   const watch = new ChatItemsWatch()
   const activity = new Activity(name, () => tools.statuses.turnsEnded())
   const schedules = new Schedules(memberId => control.isCurrentApprover(memberId))
-  const tools = new AgentTools({chat, user, actions, watch, controlChat: () => control.chatRef, standingApprover: (chatInfo, standing) => control.standingApprover(chatInfo, standing), refusedFile: (path, chatInfo, chat) => control.refusedFile(path, chatInfo, chat), data, inference, activity, abort, schedules, audio: options.audio}, approve)
-  const control: Control = new Control(chat, group, {displayName, owners: options.owners, registerHint: registerHint(options), qrCode: options.qrCode}, actions, tools, schedules)
+  const tools = new AgentTools({chat, user, actions, watch, controlChat: () => control.chatRef, standingApprover: (chatInfo, standing) => control.standingApprover(chatInfo, standing), refusedFile: (path, chatInfo, chat) => control.refusedFile(path, chatInfo, chat), data, inference, activity, abort, schedules, audio: options.audio, secrets}, approve)
+  const control: Control = new Control(chat, group, {displayName, owners: options.owners, registerHint: registerHint(options), qrCode: options.qrCode, secrets}, actions, tools, schedules)
   await control.load()
   await tools.deleteLeftoverStatuses().catch(error => logError("status messages", error))
   const factory = (): McpServer => {
@@ -147,9 +149,10 @@ async function startAgent(chat: api.ChatApi, options: ServeOptions, token: strin
     if (stopped) return
     if (event.type === "newChatItems") {
       for (const ci of event.chatItems) {
-        if (isGroupMessage(ci, control.groupId)) control.onMessage(ci)
+        if (ci.chatInfo.type === "group" && ci.chatInfo.groupInfo.groupId === control.groupId) control.onMessage(ci)
       }
     }
+    if (event.type === "groupUpdated" && event.toGroup.groupId === control.groupId) control.onGroupUpdated()
     tools.onEvent(event)
     if (event.type === "sndFileError") control.fileNotSent(event)
     if (isControlEvent(event, control.groupId)) {

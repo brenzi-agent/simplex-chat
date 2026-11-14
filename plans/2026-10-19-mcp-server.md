@@ -1,6 +1,7 @@
 # SimpleX MCP server 0.3: plan
 
 Status: draft · 2026-10-17, files and leave 2026-10-30 (`plans/2026-10-30-mcp-files-and-leave.md`), live status 2026-11-10 (`plans/2026-11-10-mcp-live-status.md`), Claude Code activity 2026-11-11 and the status at the arrival of a message 2026-11-12 (`plans/2026-11-11-mcp-live-activity.md`), scheduled prompts 2026-11-11 (`plans/2026-11-11-mcp-schedule.md`), voice messages 2026-11-12 (`plans/2026-11-12-mcp-voice.md`) · person-facing manual: `REFERENCE.md`, the plugin in short in `README.md`. Code references: master `139ce5f8c` (`/code/simplex-chat-6`), unless marked `9711dcfc9` (core 7.1.0.11); in the sections of the status message and the inference endpoint, master `f8776692df`; hook events: the Claude Code hooks reference (code.claude.com/docs/en/hooks.md) of 2026-11-11; `simplex-chat` 7.1.0-beta.10.2 loads core 7.1.0.20. Pending decisions: section Open.
+Status: draft · 2026-10-17, files and leave 2026-10-30 (`plans/2026-10-30-mcp-files-and-leave.md`), secrets 2026-11-12 (`plans/2026-11-12-mcp-secrets.md`) · person-facing manual: `REFERENCE.md`, the plugin in short in `README.md`. Code references: master `139ce5f8c` (`/code/simplex-chat-6`), unless marked `9711dcfc9` (core 7.1.0.11); `simplex-chat` 7.1.0-beta.10.2 loads core 7.1.0.20. Pending decisions: section Open.
 
 ## Scope
 
@@ -16,6 +17,7 @@ In:
 - connections to contact addresses, one-time links, groups, channels and SimpleX names, as the agent's profile or incognito;
 - bots as services: the commands a bot advertises are returned by `connect`;
 - a status message while the agent works, in a chat whose messages the owner approved with `/approve CHAT all`: the agent's state, its notes, the state of a model behind llama-swap or llama-server, and the permission prompts, compaction, running tools and subagents of the agent's Claude Code sessions, reported by status hooks.
+- secrets: owners set values in the agent control chat, and the agent uses them in shell commands by their paths; with the opencode plugin of the package, the values are replaced in model requests.
 
 Out of scope:
 
@@ -139,6 +141,7 @@ MCP SDK        @modelcontextprotocol/server 2.3.1, @modelcontextprotocol/node 2.
 QR code        qrcode ^1.5
 tests          jest with ts-jest, as packages/simplex-chat-nodejs; end to end with a local smp-server (SMP_SERVER), as steward test/e2e, and a local xftp-server (XFTP_SERVER)
 prepack        dist deleted, then tsc, so npm pack and npm publish ship no build output of deleted sources
+files          dist, README.md, .claude-plugin, .mcp.json, hooks, plugin, opencode
 ```
 
 ```
@@ -157,7 +160,15 @@ audio.ts      speech-to-text and text-to-speech requests, transcript files
 http.ts       listener, token, /mcp, /hook, the SDK handler with its Origin and Host checks
 files.ts      token, headers.json, hook-headers, server.json, lock
 register.ts   register command: the MCP entry and the status hooks
+http.ts       listener, token, /mcp, the SDK handler with its Origin and Host checks
+files.ts      token, headers.json, server.json, lock, secrets
+register.ts   register command
 log.ts        stdout log lines, stderr errors
+```
+
+```
+file                          contents
+opencode/simplex-secrets.ts   opencode plugin, TypeScript source in the package: the values of the secrets replaced in model requests
 ```
 
 ## Data folder and state
@@ -192,6 +203,13 @@ DIR/forwarded/     files /forward downloaded, until /receive    0700, created at
   FOLDER/          moves them to DIR/files/FOLDER/; deleted
                    when the agent leaves the chat, and by
                    /delete CHAT files
+DIR/secrets.json   {NAME: {setBy, setById, setAt}}: the setter  0600
+                   and the time of each secret
+SECRETS/           the folder of --secrets-folder               0700 when the server creates it; the mode of an
+                                                                existing folder unchanged
+SECRETS/NAME       the value of secret NAME, as sent, without   0600
+                   a newline; written to SECRETS/NAME.part and
+                   renamed
 ```
 
 - DIR is `~/.simplex-mcp/NAME` unless `--data` sets it.
@@ -214,6 +232,7 @@ rejected files memory: file IDs whose download call returned rejected or expired
 statuses      memory: at most one status message per chat; leftovers of a crash are deleted at the next start, in chats that meet the conditions of status messages
 activity      memory: the Claude Code activity of at most 16 agent sessions, from the status hooks
 transcribing  memory: the voice files downloaded and transcribed at arrival, at most 20; their messages are held
+secrets       files: SECRETS/NAME and DIR/secrets.json, until /unsecret NAME
 ```
 
 - Writes of the custom data run one at a time, through one queue in the server, in counter order: the library runs each command in a worker thread (`simplex-chat/cpp/simplex.cc:46-54`), and `APISetGroupCustomData` takes no lock (`Commands.hs:1668-1672`).
@@ -235,6 +254,7 @@ serve NAME:
 --qr-code         small | large                        small
 --inference       URL of llama-swap or llama-server    absent
 --audio           URL,STT,TTS[,VOICE]                  absent
+--secrets-folder  folder                               absent
 register NAME:
 --scope           user | local                         user
 --data            folder                               ~/.simplex-mcp/NAME
@@ -248,12 +268,16 @@ register NAME:
 - `--stop-wait`: at stop, after the cards of pending and performing actions are edited or posted and the status messages are deleted, the server waits this many seconds before it closes the chat, so that the agent sends those messages; 0 does not wait (section Start and shutdown).
 - `--inference`: an http or https URL, kept without trailing slashes, query and hash. The server polls it for the model state shown in status messages (section Inference endpoint). The API key is read from `SIMPLEX_MCP_INFERENCE_KEY` and sent to URL only.
 - `--audio`: URL is the base URL of an OpenAI-compatible audio API, STT its speech-to-text model, TTS its text-to-speech model and VOICE the voice of TTS. The value is 3 or 4 non-empty parts, separated by commas; URL is `http` or `https` without a user name or password, and its trailing slashes are removed. Without `--audio`, voice messages are not transcribed, and `voice` is absent from the input of `send` (section send).
+- `--stop-wait`: at stop, after the cards of pending and performing actions are edited or posted, the server waits this many seconds before it closes the chat, so that the agent sends those messages; 0 does not wait (section Start and shutdown).
+- `--secrets-folder SECRETS`: the folder of the secrets that owners set (section Secrets), resolved to an absolute path. It is compared with the data folder as resolved paths, symbolic links not followed. Without it, the secret commands get `Secrets are off: the server runs without --secrets-folder.`, and `list` leaves out `secrets`.
 
 Rejected arguments, exit code 2:
 
 ```
 argument                              message
 --reset-owners with an --owners list  --reset-owners takes --owners without a list: member IDs change in a new agent control chat.
+--secrets-folder equal to the data    --secrets-folder: a folder disjoint from the data folder expected, got <folder>
+  folder, inside it or containing it
 --owners entry not ID:NAME            --owners: ID:NAME expected, got <entry>
 NAME not ^[a-z0-9](-?[a-z0-9])*-?$,   NAME: 1 to 32 lowercase letters, digits and single hyphens, starting with a letter or digit.
   or longer than 32
@@ -373,6 +397,8 @@ shutdown, statuses deleted      Stopping: sending 2 cancelled cards and 1 status
 --inference                     Inference endpoint: http://127.0.0.1:8080   (after "Approval mode: requests")
 note, send with live            Note to contact Alice (@4): Reading the file…   (names and text on one line)
 status error, stderr            status of @4: <error> | inference endpoint: <error> | status messages: <error>
+/secret NAME VALUE              Secret GITHUB_TOKEN set by Alice.
+/unsecret NAME                  Secret GITHUB_TOKEN removed by Alice.
 ```
 
 ## What the owner sees: the agent control chat
@@ -515,6 +541,7 @@ host, interrupted   the request's lines except the commands line + "Performed wi
 ### Commands
 
 The group's command menu has `/pending`, `/list`, `/schedules`, `/leave` and `/help`; the cards show the others, except the schedule commands (section Schedules).
+The group's command menu has `/pending`, `/list`, `/leave` and `/secrets`; the cards show the action commands, and the reply to `/secret` shows `/unsecret`.
 
 ```
 menu entry   keyword   label                 params      tapped
@@ -523,6 +550,7 @@ menu entry   keyword   label                 params      tapped
 /schedules   schedules Scheduled prompts     none        sent
 /leave       leave     Leave a chat          <chat ID>   "/leave <chat ID>" in the entry field, the cursor at its end
 /help        help      Help                  none        sent
+/secrets     secrets   Secrets               none        sent
 ```
 
 - The apps put "/keyword params" into the entry field for a command with params, and send "/keyword" for one without (`CommandsMenuView.kt:154-159`, `CommandsMenuView.swift:118-124`).
@@ -548,6 +576,9 @@ command             result
 /schedules          one line per schedule, for the chats in the order of /list, then by N: "#3  1  0 7 * * 1-5  Post the trail report."; the prompt on one line; each line cut to 100 bytes as /list lines; the first 100 lines, then "K more schedules are not shown." ("1 more schedule is not shown.") when more exist
 /help               one line per command of the commands reply, in its order: its forms and its effect; from any sender
 /help COMMAND       how to use COMMAND, a keyword of the commands reply, written with or without "/": its forms and, where they apply, its parameters, rules, limits, an example and related commands; one text per group: {approve, reject}, {receive, forward}, {schedule, unschedule, schedules}; from any sender
+/secret NAME VALUE  VALUE written to SECRETS/NAME, in place of an earlier value; its record to DIR/secrets.json (section Secrets)
+/unsecret NAME      SECRETS/NAME and its record deleted
+/secrets            one line per secret, sorted by name: "GITHUB_TOKEN  set by Alice  2026-11-12 10:00 UTC"; "GITHUB_TOKEN" for a file without a record; "No secrets." when none
 ```
 
 `/list`:
@@ -607,6 +638,15 @@ commands reply                              /'revoke CHAT' ends the approval of 
 /help COMMAND, COMMAND not a keyword of     No help for that. /help lists the commands.
 the commands reply
 other one-line text starting with "/"       Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /schedule, /unschedule, /schedules, /help. Each card shows its commands.
+/secret | /unsecret | /secrets without      Secrets are off: the server runs without --secrets-folder.
+--secrets-folder
+/secret NAME VALUE                          Secret GITHUB_TOKEN is set. /'unsecret GITHUB_TOKEN'   (a new message, without a quote)
+/secret of several lines, from any sender;  Usage: /secret NAME VALUE on one line. NAME: capital letters, digits and _, starting with a letter, up to 64 characters. VALUE: 8 characters or more.
+NAME or VALUE invalid
+/unsecret NAME                              Secret GITHUB_TOKEN is removed.
+/unsecret NAME, NAME not a secret           No such secret. /secrets lists them.
+/secrets, no secrets                        No secrets.
+other one-line text starting with "/"       Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /secret, /unsecret, /secrets. Each card shows its commands.   (a new message, without a quote)
 ```
 
 After `/leave CHAT`, after its reply, and after the outcome of a leave action in state done, when the folder of CHAT has files:
@@ -811,6 +851,38 @@ the answer                a new item: notified
 - In a direct chat, the deleted status message is marked deleted in the owner's app; it is removed when the owner sets "Delete for everyone" to "always" for the agent contact (`Types/Preferences.hs:1147-1153`; `Types.hs:721-728`; `Subscriber.hs:2122`).
 - In a group or business chat, it is removed for every member when full deletion is on in the group's preferences for the agent's role, and marked deleted otherwise (`Subscriber.hs:2493-2499`; `Types/Preferences.hs:273-276`).
 - A status message, with its notes, is posted only in its chat; each note is also printed in the terminal (section Other lines).
+### Secrets
+
+With `--secrets-folder SECRETS`:
+
+```
+item               rule
+NAME               ^[A-Z][A-Z0-9_]{0,63}$
+VALUE              the params without their first word and the whitespace after it; 8 characters (code points) or more; one line
+the secrets        the files of SECRETS whose names match NAME, sorted; a file written by hand is one, without a record
+DIR/secrets.json   {NAME: {setBy, setById, setAt}}: the setter's display name and member ID, and the time; written at /secret and /unsecret
+```
+
+A received message of the agent control chat whose text matches `^\s*/secret(\s|$)`, in any letter case:
+
+```
+step                                       effect
+the control chat lost                      none
+a member support chat                      apiDeleteMemberChatItem(group, [item]), queued after the earlier owner commands; no reply
+the main conversation                      apiDeleteMemberChatItem(group, [item]), queued after the earlier owner commands; then the command:
+  several lines, any sender                  the usage reply
+  one line                                   as other commands: the commands reply, the approver check, the --secrets-folder check, then /secret
+the reply                                  a new message, without a quote
+a failed deletion                          logged as "control chat command: <error>"; the command does not run
+```
+
+- The deletion is a moderation with full deletion: the group profile has `fullDelete: {enable: "on"}`, set by `createControlChat`, again at start when it is not on, and at an owner's profile update that turns it off, queued before the commands that follow it. The core replaces the item with a moderated item, its text and its `messages` rows deleted, at the agent (`delGroupChatItems`, `Library/Commands.hs:4294-4297`; `updateGroupChatItemModerated`, `Store/Messages.hs:2857-2875`) and at each member that has it (`Library/Subscriber.hs:2490-2499`); a member who receives the message later creates it moderated (`Library/Subscriber.hs:2228-2232`, `:2268-2274`).
+- The log lines name the secret and the owner, without the value. A failed write of the files is logged as `control chat command: <error>`.
+- `/unsecret NAME` deletes only a name among the secrets: `../x` deletes nothing.
+- A secret stays until `/unsecret NAME`, also when its setter is no longer an approver.
+- The secret commands work in both modes.
+- Edits and the later text of live messages are neither deleted nor run: `onMessage` is called at `newChatItems` only.
+- The agent forwards the messages of the control chat to members as an owner (`isUserGrpFwdRelay`, `Library/Subscriber.hs:3793-3796`); the forwarded message is stored with its delivery job in the chat database until the job is done and 7 days old (`Store/Delivery.hs:251-263`, `:400-409`; `Library/Commands.hs:6555-6558`).
 
 ## What the agent sees: tools
 
@@ -1006,9 +1078,12 @@ Input: none.
 result field  type    content
 chats         array   {chat, type, name, simplex_name, peer_type, incognito, known_as, connected, unread, approved}
 actions       array   {action, tool, input, state, open}: actions of this server run in memory, whose result no call has returned; open: at least one call waits on it
+secrets       object  {folder, names}: SECRETS and the names of the secrets, read at each call; only with --secrets-folder; values are not returned
 ```
 
 - `approved: true`: the chat has a standing approval; present only then, and never in mode host.
+- The description of `list` adds: `secrets, when present, has the folder and the names of the secrets your owners set; use a secret only inside a shell command, where the command does not print it, for example as an environment variable, a header read from the file or standard input (cat FOLDER/NAME | command), not as an argument that the command may print in an error; never print, read or send its value.`
+- The agent's commands read `SECRETS/NAME` at the server's path: a sandbox of the agent mounts SECRETS at the same path and runs with the server's user ID, as the files are mode 0600.
 - An action with `open: false` resumes by calling `tool` with `input`.
 - The agent control chat is not one of the agent's chats: `list` leaves it out, and `send`, `receive` and `leave` return "unknown chat" for it.
 
@@ -1254,6 +1329,7 @@ serve(NAME, options):
   --inference: SIMPLEX_MCP_INFERENCE_KEY empty, or with characters other than visible ASCII: exit 2 "SIMPLEX_MCP_INFERENCE_KEY: visible ASCII characters expected."
   create DIR, mode 0700 (set again when DIR exists, except on Windows); DIR/lock created exclusively, or exit 1 when its PID runs; token = DIR/token, created when missing or with --new-token; DIR/headers.json and DIR/hook-headers written with the token
   chat = ChatApi.init({type: "sqlite", filePrefix: DIR/simplex})
+  --secrets-folder SECRETS: mkdir -p SECRETS, mode 0700, when missing
   profile = the user, or created: /_create user {profile: {displayName: <--display-name or NAME>, fullName: "", peerType: agent}, pastTimestamp: false}
   cfg = /network; /_network {cfg with smpProxyMode: always, smpProxyFallback: allowProtected}   # the apps' defaults, SimpleXAPI.kt:5427-5447
   mkdir DIR/tmp, mode 0700; /_temp_folder DIR/tmp   # SetTempFolder, Commands.hs:650-653; the XFTP work folder, read by startChat (Commands.hs:290-291)
@@ -1265,7 +1341,7 @@ serve(NAME, options):
   --reset-owners: membership current and role below owner: /_leave #group (parser Commands.hs:6424), as only an owner or a former member deletes a group (Commands.hs:1395-1398);
     /_delete #group full notify=on; group = createControlChat(nextAction)
   group.membership not owner, or memberStatus not creator, connected or complete: lost = true; log "The agent lost its control chat. Restart the server with --reset-owners."
-  lost unset, group.groupProfile.displayName differs from the profile's, or its commands from the menu of createControlChat: /_group_profile #group {the group profile with that displayName and menu}   # APIUpdateGroupProfile, parser Commands.hs:6534
+  lost unset: stored = /_get chat #group count=0; stored.groupProfile.displayName differs from the profile's, its commands from the menu of createControlChat, or its fullDelete is not on: /_group_profile #group {the stored group profile with that displayName, menu and fullDelete on}   # APIUpdateGroupProfile, parser Commands.hs:6534
   members = /_members #group, so approvers are known before the first call
   lost unset: schedules = the valid entries of simplexMcpSchedules in the custom data of each chat of list(), in one /_get chats read
   each chat of list() that meets the conditions of status messages: deleteLeftovers(chat), awaited (section Status message); a failed chat list: logged "status messages: <error>"
@@ -1303,12 +1379,14 @@ SIGINT, SIGTERM (process.on; a second signal ends the wait for the cards at once
 ```
 g = /_group <user> {displayName: DISPLAY, fullName: "",
   description: "Supervise your AI agent here: approve or reject its connections and messages with one tap.",
-  groupPreferences: {history: {enable: "on"}, commands: [
+  groupPreferences: {history: {enable: "on"}, fullDelete: {enable: "on"}, commands: [
     {type: "command", keyword: "pending", label: "Pending actions"},
     {type: "command", keyword: "list", label: "Chats and approvals"},
     {type: "command", keyword: "schedules", label: "Scheduled prompts"},
     {type: "command", keyword: "leave", label: "Leave a chat", params: "<chat ID>"},
     {type: "command", keyword: "help", label: "Help"}]}}
+    {type: "command", keyword: "leave", label: "Leave a chat", params: "<chat ID>"},
+    {type: "command", keyword: "secrets", label: "Secrets"}]}}
 /_set custom #g {simplexMcp: {control: true, nextAction: n}}
 log "Agent control chat \"DISPLAY\" created."
 return g with customData {simplexMcp: {control: true, nextAction: n}}       # the /_group response precedes the custom data
@@ -1316,6 +1394,7 @@ return g with customData {simplexMcp: {control: true, nextAction: n}}       # th
 
 - Commands are tappable in every message of a group whose profile lists commands (`ChatModel.kt:1849`, `ChatTypes.swift:2318`); only an owner updates the group profile (`Commands.hs:4185`).
 - History is on, so an owner who joins later receives the recent cards (`history` defaults to off, `Types/Preferences.hs:580`).
+- Full deletion is on, so the deletion of a `/secret` message deletes its text (section Secrets).
 - Event handlers start long work without awaiting it: the Node library awaits each handler before it reads the next event (`runEventsLoop`, `simplex-chat/dist/api.js:113-142`).
 
 ### Owners
@@ -1358,7 +1437,9 @@ any of them                              no --owners; approvers become empty    
 deletedMemberUser, groupDeleted,         the agent's profile removed, the group deleted,     lost = true; each pending action: state failed, error "control chat lost", card unedited;
 memberRole                                 or the agent's profile below owner (assigning owner  each performing action: its end edits no card; log "The agent lost its control chat.
                                            needs owner, Commands.hs:3008)                       Restart the server with --reset-owners."
-newChatItems, groupRcv, main scope       text starts with "/"                                ownerCommand(sender, text)
+newChatItems, groupRcv, main scope       text starts with "/"                                ownerCommand(sender, text); after the deletion of a /secret message (section Secrets)
+newChatItems, groupRcv, member support   text matches ^\s*/secret(\s|$), any letter case    the message deleted (section Secrets); no command, no reply
+groupUpdated                             an owner's update of the group's profile            queued after the earlier owner commands: stored = /_get chat #group count=0; its fullDelete not on: /_group_profile #group {the stored profile with fullDelete on}
 ```
 
 `ownerCommand(sender, text)`:
@@ -1368,6 +1449,7 @@ command = parseCommand(text)                      # steward src/commands.ts; und
 not one of the commands below: reply "Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /schedule, /unschedule, /schedules, /help. Each card shows its commands."
 help TOPIC:       TOPIC = PARAMS without a leading "/" followed by a character other than a line break; reply the help text of TOPIC: the commands for "", how to use a command for its keyword,
                   otherwise "No help for that. /help lists the commands."
+not one of the commands below: post "Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /secret, /unsecret, /secrets. Each card shows its commands." as a new message, without a quote
 sender not an approver: reply "Only owners approve actions." (--owners: "Only the owners listed in --owners approve actions.")
 approve | reject | receive | forward [CHAT] N, receive CHAT N all, action N not pending in memory, or its card unset: reply "Action N is not pending."
 the same with CHAT, action N a connect or for another chat: reply "Action N is not for CHAT."
@@ -1403,6 +1485,12 @@ unschedule CHAT N: CHAT not a chat of the agent: reply "No chat CHAT. ..."; N no
                   log "Schedule N of CHAT removed by NAME."; reply "Schedule N of ... (CHAT) is removed."
 schedules:        reply with one line per valid entry of each chat of list(), in its order: CHAT, N, CRON and the prompt on one line, joined by two spaces; each line cut to 100 encoded bytes with "…";
                   the first 100 lines, then "K more schedules are not shown." when more exist; "No schedules." when none
+secret NAME VALUE: no --secrets-folder: reply "Secrets are off: the server runs without --secrets-folder."; NAME or VALUE invalid: the usage reply;
+                  otherwise VALUE written to SECRETS/NAME.part, mode 0600, renamed to SECRETS/NAME; DIR/secrets.json written with {setBy, setById, setAt};
+                  log "Secret NAME set by SETTER."; reply "Secret NAME is set. /'unsecret NAME'"
+unsecret NAME:    no --secrets-folder: the off reply; NAME not among the secrets: reply "No such secret. /secrets lists them.";
+                  otherwise SECRETS/NAME deleted and its record removed from DIR/secrets.json; log "Secret NAME removed by SETTER."; reply "Secret NAME is removed."
+secrets:          no --secrets-folder: the off reply; otherwise one line per secret: "NAME  set by SETTER  YYYY-MM-DD HH:MM UTC", or "NAME" without a record; "No secrets." when none
 ```
 
 - Owner commands run one at a time, in arrival order: a command awaits the custom data write of the one before it.
@@ -1591,6 +1679,7 @@ attachment(file, as):
 refused real paths, each folder below by its real path:
   under ~/.ssh/ or ~/.gnupg/
   file names id_*, *.pem, *.key, *.p12, *.pfx, in any case
+  under SECRETS, with --secrets-folder
   under DIR or ~/.simplex-mcp/, except DIR/files/
 
 perform send:
@@ -1777,7 +1866,7 @@ list():
   incognito: contacts: contact.activeConn.customUserProfileId set (types.d.ts:1328); groups: membership.memberProfile.profileId differs from membership.memberContactProfileId (memberIncognito, Types.hs:1289-1290)
   known_as: groups: membership.memberProfile.displayName; contacts: the incognito profile from /_info @C, read only for incognito contacts
   approved: true in mode requests, when the chat's custom data has simplexMcp.approvedById of a current approver
-  result {chats, actions: the actions in memory, open: open > 0}
+  result {chats, actions: the actions in memory, open: open > 0, secrets: {folder: SECRETS, names: the secrets}, only with --secrets-folder}
 ```
 
 - `initial=` returns `chatStats.unreadCount` and `chatStats.minUnreadItemId` when unread items exist (its items surround the last viewed item and are not used); `count=` returns empty stats (`Store/Messages.hs:1246`, `:1353-1361`, `:1467`, `:1699-1713`).
@@ -2249,7 +2338,16 @@ http        401 without token; 403 with another Origin; 404 for other paths and 
 audio       the transcription request with model and file only, its errors, a file over 1500000 bytes refused, one request at a time; the speech request with VOICE only when given, its errors
 register    entry JSON with headersHelper and no token; timeout from server.json; remove before add; errors; on Windows, claude through cmd.exe after ENOENT, with cmd.exe quoting; the status hooks of every event, with NUL on Windows; the user settings file from CLAUDE_CONFIG_DIR, or ~/.claude when it is unset or empty; the local settings file; this agent's handlers replaced, other settings, hooks and groups kept, the same text at a second register; invalid settings files reported after the entry is added, and left unchanged; no status hooks after a failed add
 files       lock: exclusive create, a running PID, a stale PID; folder mode at every start; headers.json and hook-headers; file modes set again on existing files
+options     defaults, ranges, --stop-wait from 0 to 60, NAME, --display-name at the first and a later start, --owners with and without a list, names with commas, rejected arguments, --help text; --secrets-folder resolved, and refused when it is the data folder, inside it or contains it
+commands    /approve [CHAT] N, /reject [CHAT] N, another chat, /approve CHAT all, /revoke, /pending, /list, unknown, multi-line, non-command text, a number from an earlier run; /list of 100 chats with cut lines and the older count; chat references over 15 digits; names with line breaks and escape sequences; a listed owner by the name on one line; the restart command as code; card size at 15000 bytes, with the current approvers' longest name; a connect refused for its message, its link texts cut to fit; mode host without approvals, /approve CHAT all refused; the wait at stop with cancelled cards, skipped without them, and ended by a second signal; /receive CHAT N all and /receive CHAT off beside the approval of messages; /approve of a download and /receive or /forward of other actions refused; /forward with its reply and failure, the file outside the chat's folder; download cards with the preview, resized to fit 15000 bytes; a refused file posted and logged; an image send card with its preview; /secret deleted before its reply, stored, the reply a new message, the value absent from replies and log lines; /secret of a member who is not an approver, of several lines, /Secret, invalid NAME or VALUE: deleted and answered; without --secrets-folder; /secrets with setters and times, and a file without a record; /unsecret of unknown names and ../x; /secrt and /secrets with a value answered by a new message, not deleted; mode host; a member support chat; a failed deletion; the menu and full deletion of a new and of an existing control chat, from its stored profile; full deletion turned on again at an owner's profile update, before a later /secret is deleted, and not after the control chat is lost
+actions     every transition; attach rule; open counts; counter written before the card; a failed counter write or card post logged; stop edits pending and performing cards, aborts the performs' signal, and an interrupted perform logs no line; standing approval: performed at once, outcome card posted; 20 pending; 20 performing; decided actions deleted after expires
+cards       every card form and outcome; quoting; names and errors on one line; "as myself" and "incognito"; "where I am incognito"; leave forms; standing form; link texts cut to the bytes left; the reply quote cut by characters; download forms with sizes and the servers line; the attaching line of sends
+messages    message fields; responses with idle and wait; overflow IDs removed at deletion; receive with new messages under a concurrent call, stopping at limit + 1, a store error of a page read as its error; leave of @N and #N, pending membership included; approved in list; all chats in one read; an approval whose approver is no longer one; a group-role failure; a send to an unconnected contact or group refused; reply_to of an item other than a message refused; mentions of equal names refused; the connect wait cap; the connect wait ended by the stop; the file field of each file status and rejected, a forwarded file offered and then received; download: attach, performing at wait, a received file, a forwarded file kept outside the chat's folder and moved there at the approval, failures by events, a files approval, the wait for the file description and its end at wait, unknown servers without passwords and of disabled operators; send with file: the type and preview by extension, the resized copy deleted at sndFileCompleteXFTP and after a failed send, the fixed preview when the core can't resize or ffmpeg is absent, ffmpeg and ffprobe output, refused paths with symbolic links, a file changed after the request; list with the secrets folder and names, without values, and without --secrets-folder; a file of the secrets folder refused, also through a symbolic link
+http        401 without token; 403 with another Origin; 404 for other paths and for a request target that is not a URL, the server serving on; 503 with Retry-After until ready; SDK validation errors
+register    entry JSON with headersHelper and no token; timeout from server.json; remove before add; errors; on Windows, claude through cmd.exe after ENOENT, with cmd.exe quoting
+files       lock: exclusive create, a running PID, a stale PID; folder mode at every start; headers.json; file modes set again on existing files; secrets: the folder mode, the file modes, the index, the names, remove of unknown names and ../x
 log         every SimpleX error shape worded by the apps, in its JSON shape from @simplex-chat/types; the chain for other errors
+opencode    the plugin: a value replaced raw, URL-encoded, and in base64 and base64url at each byte alignment, Basic authorization included; a longer value before a value it contains; the names the server lists, trailing newlines ignored; a value of fewer than 8 characters refused; the hook on texts, tool inputs, outputs, errors and metadata, the info kept; values of removed and replaced secrets kept, also in a new server instance; a rejection without the folder
 ```
 
 End to end, with a local smp-server and xftp-server; the owner is a scripted profile in its own database; the agent's calls come from an MCP client in the test:
@@ -2273,6 +2371,7 @@ files             an image from a group member: status offered; the download car
 send file         a 600 × 600 PNG of random pixels sent to a group: the card with the attaching line and the core's preview, not the fixed one; the member receives an image with the core's preview and a file smaller than the PNG, at most 261120 bytes; a private key refused, posted and logged
 status            an approved direct chat: a prompt, the live item "◐ received, waiting for the agent · 0:00", then its update with "thinking" when receive returns the prompt; a note under the line, and its log line; the answer as a new item, then the status deleted, and one outcome post in the agent control chat; at stop "Stopping: sending 1 status deletion, ..." and the deletion; at the next start a leftover live item deleted
 status in a group an approved group: a prompt, the status "◐ received, waiting for the agent · 0:00", its note, and its deletion after the answer
+secret            the owner's /secret: chatItemsDeleted for it at the owner; the reply without a quote; the file holds the value; the agent's control chat items lack it; list returns the folder and the name
 ```
 
 Claude Code checks, by hand (TESTING.md):
@@ -2363,3 +2462,13 @@ C6      Claude Code closes the request stream when a call times out or its task 
 - At an `/abort`, after the statuses are ended, the turn of every agent session is ended as at its Stop, so a session that the script stops without a Stop keeps neither a turn nor labels (`plans/2026-11-12-mcp-abort.md`, decision 13).
 - In a plugin session group, `/help` also lists `/approve N all` and `/revoke TOOL` before `/give`.
 - There, `/help approve` and `/help revoke` start with a line on the approval of a tool and its end, `/help list` ends with a line on the approved tools, and `/help observer` counts the approvals of tools among the approvals that stop applying.
+## Decisions of 2026-11-12
+
+- Secrets: `--secrets-folder`; `/secret NAME VALUE`, `/unsecret NAME` and `/secrets` from approvers; one file per name; the setter and the time in `DIR/secrets.json` (`plans/2026-11-12-mcp-secrets.md`).
+- Threat: accidental exposure of values to the model provider. A prompt injection that sends a value away by reference is out of scope; the docs state it as a limit.
+- Every current owner can see a `/secret` message until the server deletes it.
+- A secret stays until `/unsecret NAME`, also when its setter is no longer an approver.
+- Values are single-line, as owner commands are parsed; 8 characters or more.
+- `list` returns the names and the folder, never the values; its description states the use in commands, as `"$(cat FOLDER/NAME)"`.
+- Redaction: an opencode plugin in the package, `opencode/simplex-secrets.ts`, with its install step in the docs. Claude Code: no redaction; the docs state it.
+- `send` and `connect` texts are not checked for values; the approval cards are the control.

@@ -55,6 +55,8 @@ serve options:
                          transcribe voice messages and send voice replies with
                          the OpenAI-compatible audio API at URL: speech-to-text
                          model STT, text-to-speech model TTS, its voice VOICE
+  --secrets-folder DIR   folder of the secrets that owners set with /secret,
+                         one file per name; disjoint from the data folder
 
 register options:
   --scope SCOPE          user (default) or local
@@ -141,6 +143,9 @@ function serveOptions(name: string, options: OptionReader, home: string): ServeO
       case "--audio":
         serve.audio = audioOptions(options.value(option))
         break
+      case "--secrets-folder":
+        serve.secrets = resolve(options.value(option))
+        break
       default:
         throw unknownOption(option)
     }
@@ -154,6 +159,7 @@ function serveOptions(name: string, options: OptionReader, home: string): ServeO
   if (serve.abortFile !== undefined && serve.approve === "host") throw usageError("--abort-file: status messages are shown only in mode requests.")
   const within = (folder: string, path: string): boolean => join(path, sep).startsWith(join(folder, sep))
   if (serve.abortFile !== undefined && (within(serve.data, serve.abortFile) || within(dirname(serve.abortFile), serve.data))) throw usageError(`--abort-file: a file in a folder disjoint from the data folder expected, got ${serve.abortFile}`)
+  if (serve.secrets !== undefined && (within(serve.data, serve.secrets) || within(serve.secrets, serve.data))) throw usageError(`--secrets-folder: a folder disjoint from the data folder expected, got ${serve.secrets}`)
   return serve
 }
 

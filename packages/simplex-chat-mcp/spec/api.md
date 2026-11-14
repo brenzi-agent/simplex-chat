@@ -215,7 +215,7 @@ Tool errors, in the order of the checks:
 | `mention: CHAT has no member N.` | ID absent from `apiListMembers` | [`AgentTools.mentionedMembers`](../src/tools.ts) |
 | `mention: members N and M have the same name.` | two mentioned members with the same display name | [`AgentTools.mentionedMembers`](../src/tools.ts) |
 | `file: an absolute path is expected.`<br>`file: no file at FILE.`<br>`file: PATH is not a file.`<br>`file: PATH can't be read.` | the path, after symbolic links | [`realFile`](../src/tools.ts) |
-| `file: PATH is refused: private keys and the server's own files are not sent.` | a file named `id_*`, `*.pem`, `*.key`, `*.p12` or `*.pfx`, or under `~/.ssh`, `~/.gnupg`, or the data folder or `~/.simplex-mcp` outside `DATA/files/`; each folder by its real path | [`AgentTools.attachment`, `isRefused`](../src/tools.ts) |
+| `file: PATH is refused: private keys and the server's own files are not sent.` | a file named `id_*`, `*.pem`, `*.key`, `*.p12` or `*.pfx`, or under `~/.ssh`, `~/.gnupg` or the secrets folder, or under the data folder or `~/.simplex-mcp` outside `DATA/files/`; each folder by its real path | [`AgentTools.attachment`, `isRefused`](../src/tools.ts) |
 | `file: PATH is empty.` | size 0 | [`AgentTools.attachment`](../src/tools.ts) |
 | `text: too long for the message with its quote; shorten it.`<br>`text: too long for a message with this TYPE; shorten it.` | the message, as the core sends it, above 15602 bytes; a send with `voice` is measured as a voice message of 300 s named `voice.m4a`, TYPE `voice` | [`AgentTools.send`, `tooLongText`, `fitsMessage`, `quoteContent`, `voiceFile`](../src/tools.ts) |
 | refusals | see [1.9](#19-action-refusals) | |
@@ -326,8 +326,9 @@ Output:
 |---|---|
 | `chats` | `chat`<br>`type`<br>`name`<br>`simplex_name`, when verified<br>`peer_type`, when present<br>`incognito`<br>`known_as`, when incognito<br>`connected`<br>`unread`: `chatStats.unreadCount`<br>`approved: true`, only under a standing approval of messages in mode `requests` |
 | `actions` | `action`<br>`tool`<br>`input`: the input of the creating call<br>`state`<br>`open`: `true` while a call waits on it |
+| `secrets` | an object, only with `--secrets-folder`:<br>`folder`: SECRETS, the server's path<br>`names`: the names of the secrets, sorted |
 
-`chats`: the contacts and groups of the main conversations from one read, `apiGetChats(USER, last 1000000)`, except the control chat. In the plugin, only the chats of the calling session are listed ([`AgentTools.agentChats`, `owns`](../src/tools.ts)). `actions`: the actions in memory of the calling session other than its mode and tool-use cards, or all actions for `serve` ([`AgentTools.listChats`](../src/tools.ts)).
+`chats`: the contacts and groups of the main conversations from one read, `apiGetChats(USER, last 1000000)`, except the control chat. In the plugin, only the chats of the calling session are listed ([`AgentTools.agentChats`, `owns`](../src/tools.ts)). `actions`: the actions in memory of the calling session other than its mode and tool-use cards, or all actions for `serve` ([`AgentTools.listChats`](../src/tools.ts)). `secrets`: the folder and the names read at each call; values are not returned ([`AgentTools.listChats`](../src/tools.ts), [`Secrets.names`](../src/files.ts)). The `list` description states the use of a secret: inside a shell command, where the command does not print it, such as an environment variable, a header read from the file or standard input (`cat FOLDER/NAME | command`), not as an argument that the command may print in an error, and never by its value ([`listDescription`](../src/tools.ts)).
 
 ### 1.7 `leave`
 
@@ -632,6 +633,7 @@ CHAT      @N or #N, 1 to 15 digits
 CRON      5 words of PARAMS, joined by single spaces
 PROMPT    the rest of PARAMS, its whitespace kept
 TOPIC     PARAMS, its whitespace kept, possibly empty; a leading "/" followed by a character other than a line break is removed
+VALUE     PARAMS without its first word and the whitespace after it
 requests
   approve N
   approve CHAT N
@@ -653,11 +655,22 @@ requests
   unschedule CHAT N
   schedules
   help TOPIC
+  secret NAME VALUE
+  unsecret NAME
+  secrets
   give CHAT N         in a plugin session group only
   observer #G ID      in a plugin session group only
 ```
 
-The server reads commands from members' messages in the main conversation of the control chat ([`startAgent`](../src/serve.ts), [`Control.onMessage`](../src/control.ts)). It answers a command with a reply that quotes it, one command after another, and it runs the expiry check before each command ([`Control.onMessage`, `ownerCommand`](../src/control.ts)).
+The server reads commands from members' messages in the main conversation of the control chat ([`startAgent`](../src/serve.ts), [`Control.onMessage`](../src/control.ts)). It answers a request with a reply that quotes it, and a text outside the requests with a new message, without a quote, one command after another, and it runs the expiry check before each command ([`Control.onMessage`, `ownerCommand`](../src/control.ts)).
+
+<a id="secret-messages"></a>A received message whose first word is `/secret`, in any letter case, from any member, while the control chat is not lost ([`Control.onMessage`](../src/control.ts)):
+
+- is deleted for all members by `apiDeleteMemberChatItem`, queued after the earlier commands; after a failed deletion, the command is not run, and the error is logged ([`Control.onMessage`](../src/control.ts));
+- in a member support chat, is deleted and gets no reply ([`Control.onMessage`](../src/control.ts));
+- after an owner's profile update that turned full deletion off, is deleted after the update that turns it on again, which that profile update queued ([`Control.onGroupUpdated`](../src/control.ts), the event handler of [`startAgent`](../src/serve.ts));
+- outside the accepted text, such as a message of several lines, gets the usage reply of `secret`, from any sender ([`Control.onMessage`](../src/control.ts));
+- gets its reply as a new message, without a quote ([`Control.onMessage`](../src/control.ts)).
 
 | Request | Condition | Reply | Code |
 |---|---|---|---|
@@ -667,6 +680,9 @@ The server reads commands from members' messages in the main conversation of the
 | `help TOPIC`, another TOPIC | any sender | `No help for that. /help lists the commands.` | [`noHelp`, `Control.ownerCommand`](../src/control.ts) |
 | any other request | sender not an approver, `--owners` absent | `Only owners approve actions.` | [`Control.ownerCommand`](../src/control.ts) |
 | any other request | sender not an approver, `--owners` given | `Only the owners listed in --owners approve actions.` | [`Control.ownerCommand`](../src/control.ts) |
+| one-line `/` text outside the requests | any sender | `Commands: /approve, /reject, /receive, /forward, /revoke, /leave, /delete, /pending, /list, /secret, /unsecret, /secrets. Each card shows its commands.`, as a new message, without a quote, so a mistyped `/secret`, such as `/secrt NAME VALUE`, which is not deleted, leaves no copy of its value in the reply. The reply in a plugin session group is in [4.3](#43-session-groups) | [`commandsReply`, `unknownCommand`, `Control.onMessage`, `ownerCommand`](../src/control.ts) |
+| any request | sender not an approver, `--owners` absent | `Only owners approve actions.` | [`Control.ownerCommand`](../src/control.ts) |
+| any request | sender not an approver, `--owners` given | `Only the owners listed in --owners approve actions.` | [`Control.ownerCommand`](../src/control.ts) |
 | `approve`, `reject`, `receive`, `forward` with N | action N absent, not `pending`, or without a card | `Action N is not pending.` | [`Control.ownerCommand`](../src/control.ts) |
 | the same with CHAT | action N is a `connect`, or for another chat | `Action N is not for CHAT.` | [`Control.ownerCommand`](../src/control.ts) |
 | `approve` | action N is a download | `Action N is a download: COMMANDS.`, COMMANDS the card's command line | [`Control.ownerCommand`](../src/control.ts) |
@@ -697,6 +713,13 @@ The server reads commands from members' messages in the main conversation of the
 | `unschedule CHAT N` | accepted, in both modes; the later schedules of CHAT are renumbered; logged | `Schedule N of KIND NAME (CHAT) is removed.` | [`Control.removeSchedule`](../src/control.ts) |
 | `schedules` | no schedules | `No schedules.` | [`Control.schedulesText`](../src/control.ts) |
 | `schedules` | otherwise | one line per schedule, chats in the order of `list`, then by N: `CHAT  N  CRON  PROMPT`, PROMPT folded to one line; each line cut to 100 bytes with `…`; after 100 lines, `K more schedules are not shown.` (`1 more schedule is not shown.`) | [`Control.schedulesText`](../src/control.ts) |
+| `secret`, `unsecret`, `secrets` | `--secrets-folder` absent | `Secrets are off: the server runs without --secrets-folder.` | [`secretsOff`, `Control.ownerCommand`](../src/control.ts) |
+| `secret NAME VALUE` | NAME not 1 to 64 capital letters, digits and `_` starting with a letter, or VALUE of fewer than 8 characters | `Usage: /secret NAME VALUE on one line. NAME: capital letters, digits and _, starting with a letter, up to 64 characters. VALUE: 8 characters or more.` | [`secretUsage`, `setSecret`](../src/control.ts), [`secretName`](../src/files.ts) |
+| `secret NAME VALUE` | accepted; VALUE written to `SECRETS/NAME`, replacing an earlier value; the setter and the time written to `DATA/secrets.json`; logged | `Secret NAME is set. /'unsecret NAME'` | [`setSecret`](../src/control.ts) |
+| `unsecret NAME` | NAME not among the secrets | `No such secret. /secrets lists them.` | [`removeSecret`](../src/control.ts) |
+| `unsecret NAME` | accepted; `SECRETS/NAME` and its record deleted; logged | `Secret NAME is removed.` | [`removeSecret`](../src/control.ts) |
+| `secrets` | no secrets | `No secrets.` | [`secretsText`](../src/control.ts) |
+| `secrets` | otherwise | one line per name, sorted: `NAME  set by SETTER  YYYY-MM-DD HH:MM UTC`, or `NAME` for a file without a record | [`secretsText`](../src/control.ts) |
 
 KIND is `contact`, `bot`, `agent`, `business`, `group` or `channel` ([`contactKind`, `groupKind`](../src/tools.ts)). WHAT is `connect to SUBJECT`, `send to SUBJECT`, `download NAME from SUBJECT`, `delete SUBJECT` or `leave SUBJECT` ([`summary`](../src/actions.ts)). SIZE is in bytes, KB, MB or GB, by 1000, with one decimal ([`sizeText`](../src/control.ts)). Names are shown by [`safeName`](../src/control.ts).
 
@@ -705,6 +728,8 @@ A standing approval is stored in the chat's custom data, `simplexMcp` for messag
 CRON has 5 fields: minute 0-59, hour 0-23, day of month 1-31, month 1-12 and day of week 0-7, 0 and 7 Sunday. Each field is a comma list of `*`, `N`, `A-B`, `*/S` and `A-B/S`. The fields are matched against the server's local time; when neither the day of month nor the day of week starts with `*`, a match of either day field suffices, as in vixie cron; otherwise both must match ([`cronRanges`, `cronItem`, `cronMatches`, `fieldValues`](../src/schedule.ts)). UTC±HH:MM is the offset of the server's local time from UTC at the reply ([`utcOffset`](../src/control.ts)).
 
 A schedule is stored in the chat's custom data, key `simplexMcpSchedules`, as an array of `{cron, prompt, by, byId, at}`: the author's display name and member ID, and the creation time in ISO 8601; other keys are kept. Entries of another shape, or with a refused cron, are ignored, and dropped at the next accepted `/schedule` or `/unschedule` of the chat ([`schedulesOf`](../src/control.ts)). A schedule applies in both modes while member `byId` is an approver and the control chat is not lost ([`Schedules.markDue`](../src/schedule.ts), [`Control.isCurrentApprover`](../src/control.ts)); its delivery is described in [Architecture: scheduled prompts](architecture.md#58-scheduled-prompts).
+
+<a id="secrets"></a>SECRETS is the folder of `--secrets-folder`. The secrets are its files whose names have 1 to 64 capital letters, digits and `_`, starting with a letter; a value is written to `NAME.part` and renamed to `NAME`, both mode 0600 ([`secretName`, `Secrets`](../src/files.ts)). The record of a secret in `DATA/secrets.json` is `{setBy, setById, setAt}`: the setter's display name and member ID, and the time. A secret is kept until `unsecret`, also when its setter is no longer an approver. In mode `host`, the secret commands work as in mode `requests`.
 
 ### 2.2 Cards
 
@@ -792,11 +817,13 @@ ENTRIES: `ID:NAME` of each human, or of each human owner, joined by commas; an e
 
 | Field | Value | Code |
 |---|---|---|
-| display name | the agent's display name, updated at start when it differs from the display name in the group's profile read at the start. The other fields of that profile are kept, as in 0.2 | [`Control.load`, `updateProfile`, `changeGroupProfile`](../src/control.ts) |
+| display name | the agent's display name, updated at start when it differs from the display name in the group's profile in the chat database. The other fields of that profile are kept | [`Control.load`, `updateProfile`, `updateGroupProfile`, `changeGroupProfile`](../src/control.ts) |
 | full name | empty | [`createControlChat`](../src/control.ts) |
 | description | `Supervise your AI agent here: approve or reject its connections and messages with one tap.` | [`createControlChat`](../src/control.ts) |
 | history | on | [`createControlChat`](../src/control.ts) |
 | command menu | `/pending` "Pending actions"<br>`/list` "Chats and approvals"<br>`/schedules` "Scheduled prompts"<br>`/leave` "Leave a chat", params `<chat ID>`<br>`/help` "Help"<br>updated at start when it differs | [`controlCommands`, `Control.load`](../src/control.ts) |
+| full deletion | on: the content of a message deleted by the agent is replaced, in the agent's database and in the members' apps; set again at start when it is not on, and at once when an owner's profile update turns it off, queued with the owner commands | [`fullDelete`, `Control.load`, `onGroupUpdated`, `createControlChat`](../src/control.ts), the event handler of [`startAgent`](../src/serve.ts) |
+| command menu | `/pending` "Pending actions"<br>`/list` "Chats and approvals"<br>`/leave` "Leave a chat", params `<chat ID>`<br>`/secrets` "Secrets"<br>updated at start when it differs | [`controlCommands`, `Control.load`](../src/control.ts) |
 
 ---
 
@@ -837,6 +864,7 @@ NAME: 1 to 32 characters of `[a-z0-9]` and single hyphens, starting with a lette
 With `--inference`, `SIMPLEX_MCP_INFERENCE_KEY` is read before the data folder is prepared. A set key is accepted with 1 or more visible ASCII characters (0x21 to 0x7e) only, and it is sent as `Authorization: Bearer KEY` to URL only; the proxies of `/running` are polled without it ([`startServer`, `inferenceKey`](../src/serve.ts), [`sample`, `get`](../src/inference.ts)). The polls are described in [Architecture 2.12](architecture.md#212-inferencets).
 
 With `--abort-file`, the abort counter is created in `startServer` after the headers files, before `ChatApi.init`: FILE's first line is read, and a first line of 1 to 15 digits is kept as the count; otherwise, also for a missing FILE, `0` and a newline are written. At each `/abort` of [1.11](#111-abort), the count plus 1 is written, and 1 is then added to the count; a failed write leaves the count unchanged. FILE is written through `FILE.part`: the text is written to `FILE.part` with mode 0644, set again by `chmod` except on Windows, and `FILE.part` is renamed to FILE. At a missing folder, a folder at FILE or a refused write during the start, the lock is released, and the process exits with code 1 and `simplex-mcp: ERROR` ([`startServer`](../src/serve.ts), [`abortCounter`, `writeReadableFile`](../src/files.ts), top-level catch of `main` in [`cli.ts`](../src/cli.ts)). The script that reads FILE is described in [Reference](../REFERENCE.md#abort).
+| `--secrets-folder` | folder | absent | resolved to an absolute path; refused when it is the data folder, inside it, or contains it, compared as resolved paths; created at start with mode 0700 when missing; absent: the secret commands are off | [`serveOptions`](../src/cli.ts), [`startAgent`](../src/serve.ts), the constructor of [`Secrets`](../src/files.ts) |
 
 ### 3.2 `register`
 
@@ -898,6 +926,7 @@ Status hooks, written after `claude mcp add-json` succeeds ([`register`, `status
 | 2 | `--abort-file: status messages are shown only in mode requests.` | [`serveOptions`](../src/cli.ts) |
 | 2 | `--abort-file: a file in a folder disjoint from the data folder expected, got FILE` | [`serveOptions`](../src/cli.ts) |
 | 2 | `SIMPLEX_MCP_INFERENCE_KEY: visible ASCII characters expected.`, with `--inference`, for a set key, empty or with a character outside 0x21 to 0x7e, before the data folder is prepared | [`startServer`, `inferenceKey`](../src/serve.ts) |
+| 2 | `--secrets-folder: a folder disjoint from the data folder expected, got DIR` | [`serveOptions`](../src/cli.ts) |
 | 2 | `--owners: member ENTRY is not in the agent control chat. Start with --reset-owners --owners, or use the IDs of current members.` | [`Control.startListed`](../src/control.ts) |
 | 1 | `Another server uses DATA (PID N). If no server runs, remove DATA/lock.` | [`acquireLock`, `lockedError`](../src/files.ts) |
 | 1 | `Port PORT is in use. Start with --port N.` | [`listen`](../src/serve.ts) |
@@ -938,6 +967,8 @@ stdout ([`log`](../src/log.ts)):
 | `/schedule CHAT CRON PROMPT` | `Schedule N of CHAT added by NAME: CRON.`, NAME on one line | [`Control.addSchedule`](../src/control.ts) |
 | `/unschedule CHAT N` | `Schedule N of CHAT removed by NAME.`, NAME on one line | [`Control.removeSchedule`](../src/control.ts) |
 | scheduled prompt due | `Scheduled prompt N of CHAT is due.` | [`Schedules.markDue`](../src/schedule.ts) |
+| `/secret NAME VALUE` accepted | `Secret NAME set by NAME.`, without the value | [`setSecret`](../src/control.ts) |
+| `/unsecret NAME` accepted | `Secret NAME removed by NAME.` | [`removeSecret`](../src/control.ts) |
 | refused file, file not sent | as in [2.3](#23-other-posts), names and paths on one line | [`Control.refusedFile`, `fileNotSent`](../src/control.ts) |
 | stop | `Cancelled K action.` or `Cancelled K actions.` when K > 0<br>`Stopping: sending PARTS, up to S s. Ctrl-C to stop now.` when PARTS is not empty and S > 0; PARTS is `K cancelled card(s)` when cards were edited or posted and the control chat is not lost, and `M status deletion(s)` when status messages had a render, joined by ` and `<br>`Stopped.` | `stop` in [`startAgent`](../src/serve.ts), [`waitForStopMessages`](../src/serve.ts) |
 | membership messages | see [2.4](#24-membership-messages) | |
@@ -999,7 +1030,7 @@ on reply {file, text?}:
     tool error, the core's text
 ```
 
-Sources: [`AgentTools.reply`, `sendFile`, `refusedFeature`, `featureOff`, `AgentTools.call`](../src/tools.ts), the `replyChat` of the [`Session`](../src/hub.ts) constructor. The core checks the preference at the send, and only owners change it. Claude changes only its own fields of a group's profile, so the owners' preferences stay ([`Control.load`, `rename`, `describe`, `updateProfile`, `updateGroupProfile`, `changeGroupProfile`](../src/control.ts), [`MainGroup.load`](../src/main-group.ts)). The profile updates are in [4.2](#42-main-group) and [4.3](#43-session-groups).
+Sources: [`AgentTools.reply`, `sendFile`, `refusedFeature`, `featureOff`, `AgentTools.call`](../src/tools.ts), the `replyChat` of the [`Session`](../src/hub.ts) constructor. The core checks the preference at the send, and only owners change it. Claude changes only its own fields of a group's profile, and turns full deletion on, so the owners' other preferences stay ([`Control.load`, `rename`, `describe`, `updateProfile`, `updateGroupProfile`, `changeGroupProfile`](../src/control.ts), [`MainGroup.load`](../src/main-group.ts)). The profile updates are in [4.2](#42-main-group) and [4.3](#43-session-groups).
 
 ### 4.2 Main group
 
@@ -1011,7 +1042,7 @@ Sources: [`AgentTools.reply`, `sendFile`, `refusedFeature`, `featureOff`, `Agent
 | `/join N` | no session N | `No session N. /sessions lists the sessions.` | [`Hub.join`](../src/hub.ts) |
 | `/join N` | the sender is a member of its group | `You are a member of "N · NAME".` | [`Hub.join`](../src/hub.ts) |
 | `/join N` | otherwise: the sender is invited through the Main group, as `owner` when the sender is an owner of the Main group, else as `admin` | `Sent you an invitation to "N · NAME".` | [`Hub.join`, `Session.invite`](../src/hub.ts) |
-| other one-line `/` text | | `Unknown command.` | [`unknownCommand`, `MainGroup.command`](../src/main-group.ts) |
+| other one-line `/` text | | `Unknown command.`, as a new message, without a quote | [`unknownCommand`, `MainGroup.onMessage`, `command`](../src/main-group.ts) |
 
 Posts:
 
@@ -1089,7 +1120,8 @@ Commands and replies are those of [2.1](#21-commands-and-replies), from approver
 | `/revoke TOOL` | TOOL, of letters, digits, `_` and `-`, is approved | ``Uses of `TOOL` need approval again.`` | [`Control.revokeTool`](../src/control.ts) |
 | `/revoke TOOL` | TOOL is not approved | ``Uses of `TOOL` have no standing approval.`` | [`Control.revokeTool`](../src/control.ts) |
 | `/list` | | the chats of [2.1](#21-commands-and-replies), then one line per approved tool: `` `TOOL`  approved for this session by NAME `` | [`Control.chatsText`, `Control.approvedTools`](../src/control.ts) |
-| one-line `/` text outside the requests | an admin or owner | `Unknown command.` | [`unknownCommand`, `Control.ownerCommand`](../src/control.ts) |
+| `secret NAME VALUE`, `unsecret NAME`, `secrets` | from an admin or owner: a one-line `/secret` is deleted first, as in [2.1](#21-commands-and-replies). A `/secret` of several lines is passed to Claude as a prompt, and a `/secret` of a moderator, member or author gets the reply of the last row; neither is deleted | `Secrets are off: the server runs without --secrets-folder.` | [`Control.onMessage`, `ownerCommand`](../src/control.ts), [`Session.onMessage`](../src/hub.ts) |
+| one-line `/` text outside the requests | an admin or owner | `Unknown command.`, as a new message, without a quote | [`unknownCommand`, `Control.onMessage`, `ownerCommand`](../src/control.ts) |
 | any one-line `/` text | a moderator, member or author. The session replies before `Control`, and the text is passed to neither `Control` nor Claude | `Only admins and owners of this group can send / commands.`, quoting the message | [`commandsApproversOnly`, `Session.onMessage`, `refusesCommand`](../src/hub.ts) |
 
 The requests `give CHAT N` and `observer #G ID` of [2.1](#21-commands-and-replies), `approve N all` and `revoke TOOL` are parsed only in a plugin session group ([`ownerRequest`](../src/control.ts)). Approvers are the active members of the session group with the role `admin` or `owner`, other than Claude and `User`, however they joined. An observer can't send, because the core refuses an observer's message ([`Session.approves`, `isUser`](../src/hub.ts), [`sessionApproverRoles`, `Control.approvers`, `isHuman`, `isApprover`](../src/control.ts)). The core accepts an observer's reaction, and the hub ignores it ([`Session.onReaction`](../src/hub.ts), [`canSend`](../src/control.ts)). Member IDs differ between session groups, so after `/give`, the prompts of a schedule added in the group of the giving session become due only when CHAT is given back ([`Schedules.markDue`](../src/schedule.ts), [`Control.isCurrentApprover`](../src/control.ts)).
@@ -1200,11 +1232,12 @@ at = performance.timeOrigin of the hook process; absent: Infinity for an answer'
 | short description | `MODEL · effort LEVEL`, the parts known so far |
 | history | on |
 | direct messages | off |
+| full deletion | on, set again at a rename when it is not on, and at once when an owner's profile update turns it off |
 | command menu | as in [2.5](#25-group-profile) |
 | members | `Claude`, the members invited through the Main group, the members others added directly, `User` |
 | peer types | `Claude` `agent`; `User` `human`, set at each service start ([`User.open`](../src/user.ts), [`updatedUser`](../src/core.ts)). A member who joined while `User` had `agent`, as in 0.3.0, gets `human` with `User`'s next post in the group, with the event `updated profile`: the core sends a member's profile to a group before the next message after a change of its name, full name, short description, description, image or peer type |
 
-Claude makes the profile updates one at a time. It starts each from the group's current profile in the chat database and changes only the display name, the short description or the command menu. So a rename and a model change that overlap both stay.
+Claude makes the profile updates one at a time. It starts each from the group's current profile in the chat database and changes only the display name, the short description or the command menu, or turns full deletion on. So a rename and a model change that overlap both stay.
 
 The hub takes the model and the effort level of a `/turn` only when its `at` is not older than the `at` of the value it took last. It keeps the two times apart, one for the model and one for the effort level. The model of a `/title` comes with the `at` of its SessionStart hook, as described in [4.6](#46-socket-protocol). A request without `at` counts as the current time. So when a Stop request that waited for its transcript entry arrives after a later model switch, the model of the switch stays ([`Session.turn`, `newer`](../src/hub.ts)).
 
@@ -1416,6 +1449,8 @@ The default is used for a missing or blank variable ([`readConfig`, `mainGroup`,
 | [`.mcp.json`](../.mcp.json) | server `simplex`: `node ${CLAUDE_PLUGIN_ROOT}/dist/cli.js session` with the three option variables, and `timeout` 169800000 ms |
 | [`hooks/hooks.json`](../hooks/hooks.json) | The SessionStart hook runs `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook session-start`, with timeout 600 s. The command of PreToolUse, with matcher `mcp__plugin_simplex_simplex__.*`, is `node "${CLAUDE_PLUGIN_ROOT}/plugin/allow.js"`. UserPromptSubmit, Stop, PostModelSwitch and PostCompact use `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook turn`, with `async: true`, and so do a second PreToolUse entry, PostToolUse and PostToolUseFailure, each with matcher `*`. The second PreToolUse entry also has a hook of type `mcp_tool`: it calls the tool `pre_tool_use` of the server `plugin:simplex:simplex` with the input `{"tool": "${tool_name}"}`, with timeout 5 s ([4.1](#41-tools-in-the-plugin)). MessageDisplay runs `node "${CLAUDE_PLUGIN_ROOT}/dist/display.js"`, with timeout 2 s, without `async`: Claude Code runs this event's hooks in the foreground |
 | [`package.json`](../package.json) | `files`: the build, `README.md` and the plugin files, without a lockfile. With `bundleDependencies: true`, the pack bundles the production packages of `node_modules`, the dependencies and their dependencies, and no development package. `prepack` deletes `dist` and builds it again. Claude Code installs a plugin's dependencies only when `bun.lock`, `npm-shrinkwrap.json`, `package-lock.json` or `bun.lockb` is in its folder. So it installs nothing here, and the plugin loads its bundled modules |
+| [`hooks/hooks.json`](../hooks/hooks.json) | The SessionStart hook runs `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook session-start`, with timeout 600 s. The command of PreToolUse, with matcher `mcp__plugin_simplex_simplex__.*`, is `node "${CLAUDE_PLUGIN_ROOT}/plugin/allow.js"`. UserPromptSubmit, Stop, PostModelSwitch and PostCompact use `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook turn`, with `async: true`, and so do a second PreToolUse entry, PostToolUse and PostToolUseFailure, each with matcher `*`. The second PreToolUse entry also has a hook of type `mcp_tool`: it calls the tool `pre_tool_use` of the server `plugin:simplex:simplex` with the input `{"tool": "${tool_name}"}`, with timeout 5 s ([4.1](#41-tools-in-the-plugin)) |
+| [`package.json`](../package.json) | `files`: the build, `README.md`, the plugin files and `opencode`, without a lockfile. With `bundleDependencies: true`, the pack bundles the production packages of `node_modules`, the dependencies and their dependencies, and no development package. `prepack` deletes `dist` and builds it again. Claude Code installs a plugin's dependencies only when `bun.lock`, `npm-shrinkwrap.json`, `package-lock.json` or `bun.lockb` is in its folder. So it installs nothing here, and the plugin loads its bundled modules |
 | [`package-lock.json`](../package-lock.json) | the tree that `npm ci` installs for development and in `build.yml` before the publication. Its production packages are marked `inBundle`. It is not packed |
 | [`plugin/allow.js`](../plugin/allow.js) | prints `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}` |
 | `dist/display.js` | the MessageDisplay hook, built from [`src/display.ts`](../src/display.ts), see below |

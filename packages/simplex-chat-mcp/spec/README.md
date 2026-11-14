@@ -34,6 +34,8 @@ An owner can also schedule prompts for a chat with `/schedule CHAT CRON PROMPT` 
 
 The server keeps actions, downloads and due scheduled prompts in memory, and they are lost when the process exits. The action counter, the standing approvals and the schedules are stored as custom data in the chat database. The token, the headers files for the host and its hooks, the server record and the lock are files in the data folder; downloaded files are in its `files` folder, one folder per chat, with the transcripts of voice files beside them.
 
+With `--secrets-folder`, an approver sets a secret with `/secret NAME VALUE` in the control chat: the server deletes the message for all members and writes the value to a file of the secrets folder. `list` returns the folder and the names, and the agent uses a value in shell commands by its path. With the package's opencode plugin, the values are replaced in the requests that opencode sends to the model.
+
 The package is also a Claude Code plugin. Each Claude Code session runs `simplex-mcp session`, a stdio MCP server. The session server forwards tool calls over a local socket to `simplex-mcp service`, one service per data root. Requests on the socket are HTTP/1.1 with a bearer token. The service runs two cores:
 - `Claude` is the profile that peers see. It holds the Main group, one group per session and the chats with peers. In a session's group it posts Claude's texts and answers, one line for each step, for each of Claude Code's own prompts and for each summary of the session's context, and the end line of each turn.
 - `User` is a member of every session group. It posts the prompts typed in the terminal.
@@ -148,6 +150,7 @@ graph TD
   control --> messages
   control --> qr
   control --> log
+  control --> files
   control -.-> serve
   control --> schedule
   tools --> actions
@@ -168,6 +171,7 @@ graph TD
   inference --> log
   tools -.-> schedule
   tools --> audio
+  tools -.-> files
   actions --> messages
   actions --> log
   actions -.-> tools
@@ -222,6 +226,7 @@ graph TD
 | [`audio.ts`](../src/audio.ts) | speech-to-text and text-to-speech requests, the queue of transcriptions, transcript files |
 | [`core.ts`](../src/core.ts) | one SimpleX core: init, user, network config, temp folder, event buffer, profile update |
 | [`files.ts`](../src/files.ts) | data folders, lock, token, `headers.json`, `hook-headers`, `server.json`, session folders, socket path, service log, the abort count of `--abort-file` |
+| [`files.ts`](../src/files.ts) | data folders, lock, token, `headers.json`, `server.json`, session folders, socket path, service log, the secrets folder and `secrets.json` |
 | [`log.ts`](../src/log.ts) | log lines, error texts, shell quoting |
 | [`qr.ts`](../src/qr.ts) | QR code text: `small` and `large` for terminals, `plain` for the hook message |
 | [`version.ts`](../src/version.ts) | package version from `package.json` |
@@ -239,6 +244,7 @@ graph TD
 | [`paths.ts`](../src/paths.ts) | plugin: the data root, the socket path and the token file's name, with Node modules only |
 | [`owner.ts`](../src/owner.ts) | plugin: `link` and `reset-owners` |
 | [`config.ts`](../src/config.ts) | plugin: option variables to `Config`, validation |
+| [`opencode/simplex-secrets.ts`](../opencode/simplex-secrets.ts) | opencode plugin, outside the server: the values of the secrets replaced in model requests |
 
 Claude Code uses these files of the plugin, described in [API 4.8](api.md#48-plugin-options-files-and-hook-output):
 - [`.claude-plugin/plugin.json`](../.claude-plugin/plugin.json)
@@ -285,6 +291,8 @@ Claude Code uses these files of the plugin, described in [API 4.8](api.md#48-plu
 | Claude Code entry of `serve` | [`src/register.ts`](../src/register.ts) | `register` |
 | Status hooks | [`src/register.ts`](../src/register.ts) | `statusHooks` |
 | Data folder files | [`src/files.ts`](../src/files.ts) | `createDataFolder`, `acquireLock` |
+| Secrets folder | [`src/files.ts`](../src/files.ts) | `Secrets` |
+| opencode plugin | [`opencode/simplex-secrets.ts`](../opencode/simplex-secrets.ts) | default export |
 | Session server | [`src/session.ts`](../src/session.ts) | `startSession` |
 | Session to service link | [`src/session.ts`](../src/session.ts) | `ServiceLink` |
 | Service start by a client | [`src/client.ts`](../src/client.ts) | `ServiceClient.ensureService` |

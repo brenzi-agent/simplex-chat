@@ -39,7 +39,7 @@ describe("serve options", () => {
 
   it("reads every option", () => {
     const {options} = parseCommand(
-      ["serve", "agent-2", "--data", "/tmp/a", "--display-name", "Agent Two", "--approve", "host", "--expire", "1", "--stop-wait", "0", "--port", "5227", "--qr-code", "large", "--audio", "http://127.0.0.1:8080,stt,tts,ana", "--new-token", "--reset-owners", "--owners"],
+      ["serve", "agent-2", "--data", "/tmp/a", "--display-name", "Agent Two", "--approve", "host", "--expire", "1", "--stop-wait", "0", "--port", "5227", "--qr-code", "large", "--audio", "http://127.0.0.1:8080,stt,tts,ana", "--new-token", "--reset-owners", "--owners", "--secrets-folder", "/tmp/s"],
       home,
     ) as {options: object}
     expect(options).toEqual({
@@ -56,6 +56,7 @@ describe("serve options", () => {
       newToken: true,
       resetOwners: true,
       owners: [],
+      secrets: "/tmp/s",
     })
   })
 
@@ -67,6 +68,16 @@ describe("serve options", () => {
       expect(usage(["serve", "agent", "--audio", value])).toBe(`--audio: URL,STT,TTS or URL,STT,TTS,VOICE with an http or https URL expected, got ${value}`)
     }
     expect(usage(["serve", "agent", "--audio"])).toBe("--audio: a value expected.")
+  })
+
+  it("takes a secrets folder disjoint from the data folder", () => {
+    expect(parseCommand(["serve", "agent", "--secrets-folder", "secrets"], home)).toMatchObject({options: {secrets: join(process.cwd(), "secrets")}})
+    expect(parseCommand(["serve", "agent", "--data", "/tmp/a", "--secrets-folder", "/tmp/x/../ab"], home)).toMatchObject({options: {data: "/tmp/a", secrets: "/tmp/ab"}})
+    const refused = (folder: string): string => `--secrets-folder: a folder disjoint from the data folder expected, got ${folder}`
+    for (const folder of ["/tmp/a", "/tmp/a/secrets", "/tmp"]) expect(usage(["serve", "agent", "--data", "/tmp/a", "--secrets-folder", folder])).toBe(refused(folder))
+    expect(usage(["serve", "agent", "--secrets-folder", "/tmp/a/secrets", "--data", "/tmp/a"])).toBe(refused("/tmp/a/secrets"))
+    expect(usage(["serve", "agent", "--secrets-folder", "/home/alice/.simplex-mcp"])).toBe(refused("/home/alice/.simplex-mcp"))
+    expect(usage(["serve", "agent", "--secrets-folder"])).toBe("--secrets-folder: a value expected.")
   })
 
   it("takes the QR code size", () => {
@@ -210,6 +221,7 @@ describe("help", () => {
     expect(helpText).toContain(
       "  --audio URL,STT,TTS[,VOICE]\n                         transcribe voice messages and send voice replies with\n                         the OpenAI-compatible audio API at URL: speech-to-text\n                         model STT, text-to-speech model TTS, its voice VOICE\n",
     )
+    expect(helpText).toContain("  --secrets-folder DIR   folder of the secrets that owners set with /secret,\n                         one file per name; disjoint from the data folder\n")
     expect(helpText.endsWith("--reset-owners takes --owners without a list.\n")).toBe(true)
   })
 })
