@@ -5,6 +5,7 @@ import {T} from "@simplex-chat/types"
 import {api} from "simplex-chat"
 import {Action, Actions, Mode} from "./actions"
 import {Activity} from "./activity"
+import {AudioOptions} from "./audio"
 import {Control, controlDataOf, createControlChat, findControlGroup, hasOutcomeCard, isControlEvent, isGroupMessage, resetControlChat} from "./control"
 import {bufferEvents, prepareCore, updatedUser} from "./core"
 import {abortCounter, acquireLock, createDataFolder, releaseLock, serverToken, writeHeadersFile, writeServerFile} from "./files"
@@ -40,6 +41,7 @@ export interface ServeOptions {
   stopWait: number
   inference?: string
   abortFile?: string
+  audio?: AudioOptions
 }
 
 // spec: spec/architecture.md#serve-runningserver
@@ -72,7 +74,7 @@ export async function serve(options: ServeOptions): Promise<void> {
 
 // spec: spec/architecture.md#serve-startserver
 export async function startServer(options: ServeOptions): Promise<RunningServer> {
-  const {name, data} = options
+  const {name, data, audio} = options
   const inference = options.inference === undefined ? undefined : inferencePoller({url: options.inference, key: inferenceKey()})
   createDataFolder(data)
   acquireLock(data)
@@ -85,6 +87,7 @@ export async function startServer(options: ServeOptions): Promise<RunningServer>
     log(`Data folder: ${data}`)
     log(`Approval mode: ${options.approve}`)
     if (options.inference !== undefined) log(`Inference endpoint: ${options.inference}`)
+    if (audio !== undefined) log(`Audio: ${audio.url}, speech-to-text ${audio.stt}, text-to-speech ${audio.tts}${audio.voice === undefined ? "" : `, voice ${audio.voice}`}`)
     try {
       return await startAgent(chat, options, token, inference, abort)
     } catch (error) {
@@ -117,7 +120,7 @@ async function startAgent(chat: api.ChatApi, options: ServeOptions, token: strin
   const watch = new ChatItemsWatch()
   const activity = new Activity(name, () => tools.statuses.turnsEnded())
   const schedules = new Schedules(memberId => control.isCurrentApprover(memberId))
-  const tools = new AgentTools({chat, user, actions, watch, controlChat: () => control.chatRef, standingApprover: (chatInfo, standing) => control.standingApprover(chatInfo, standing), refusedFile: (path, chatInfo, chat) => control.refusedFile(path, chatInfo, chat), data, inference, activity, abort, schedules}, approve)
+  const tools = new AgentTools({chat, user, actions, watch, controlChat: () => control.chatRef, standingApprover: (chatInfo, standing) => control.standingApprover(chatInfo, standing), refusedFile: (path, chatInfo, chat) => control.refusedFile(path, chatInfo, chat), data, inference, activity, abort, schedules, audio: options.audio}, approve)
   const control: Control = new Control(chat, group, {displayName, owners: options.owners, registerHint: registerHint(options), qrCode: options.qrCode}, actions, tools, schedules)
   await control.load()
   await tools.deleteLeftoverStatuses().catch(error => logError("status messages", error))

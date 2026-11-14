@@ -2,6 +2,7 @@
 import {homedir} from "os"
 import {dirname, join, resolve, sep} from "path"
 import {Mode} from "./actions"
+import {AudioOptions} from "./audio"
 import {sessionStart, turn} from "./hook"
 import {ExitError, log, logError} from "./log"
 import {validName} from "./messages"
@@ -50,6 +51,10 @@ serve options:
   --abort-file FILE      show /abort in status messages and count it in FILE
                          for the script that runs the agent; FILE in a folder
                          disjoint from the data folder; mode requests only
+  --audio URL,STT,TTS[,VOICE]
+                         transcribe voice messages and send voice replies with
+                         the OpenAI-compatible audio API at URL: speech-to-text
+                         model STT, text-to-speech model TTS, its voice VOICE
 
 register options:
   --scope SCOPE          user (default) or local
@@ -133,6 +138,9 @@ function serveOptions(name: string, options: OptionReader, home: string): ServeO
       case "--abort-file":
         serve.abortFile = resolve(options.value(option))
         break
+      case "--audio":
+        serve.audio = audioOptions(options.value(option))
+        break
       default:
         throw unknownOption(option)
     }
@@ -213,6 +221,21 @@ function approveMode(value: string): Mode {
 function qrCodeSize(value: string): QrCodeSize {
   if (value !== "small" && value !== "large") throw usageError(`--qr-code: small or large expected, got ${value}`)
   return value
+}
+
+// spec: spec/api.md#serve-options
+function audioOptions(value: string): AudioOptions {
+  const parts = value.split(",")
+  const [url, stt, tts, voice] = parts
+  if (parts.length < 3 || parts.length > 4 || parts.includes("") || !isHttpUrl(url)) throw usageError(`--audio: URL,STT,TTS or URL,STT,TTS,VOICE with an http or https URL expected, got ${value}`)
+  return {url: url.replace(/\/+$/, ""), stt, tts, voice}
+}
+
+// spec: spec/api.md#serve-options
+function isHttpUrl(value: string): boolean {
+  if (!URL.canParse(value)) return false
+  const {protocol, username, password} = new URL(value)
+  return (protocol === "http:" || protocol === "https:") && username === "" && password === ""
 }
 
 // spec: spec/api.md#exit-codes

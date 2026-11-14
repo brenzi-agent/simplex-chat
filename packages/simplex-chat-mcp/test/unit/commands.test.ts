@@ -5,6 +5,7 @@ import {CallToolResult} from "@modelcontextprotocol/server"
 import {ChatEvent, T} from "@simplex-chat/types"
 import {core} from "simplex-chat"
 import {Action, Actions, Mode, NewAction, ToolError} from "../../src/actions"
+import {AudioOptions} from "../../src/audio"
 import {Control, cardText, parseCommand} from "../../src/control"
 import {ExitError} from "../../src/log"
 import {ChatItemsWatch, Collected, utcMinutes} from "../../src/messages"
@@ -47,9 +48,9 @@ function agentChats(): FakeChat {
   return chat
 }
 
-async function controlWith(chat: FakeChat, actions: Actions, owners?: OwnerEntry[], mode: Mode = "requests"): Promise<{control: Control; tools: AgentTools; schedules: Schedules}> {
+async function controlWith(chat: FakeChat, actions: Actions, owners?: OwnerEntry[], mode: Mode = "requests", audio?: AudioOptions): Promise<{control: Control; tools: AgentTools; schedules: Schedules}> {
   const schedules = new Schedules(memberId => control.isCurrentApprover(memberId))
-  const tools = new AgentTools({chat: chat.api(), user, actions, watch: new ChatItemsWatch(), controlChat: () => "#10", standingApprover: (chatInfo, standing) => control.standingApprover(chatInfo, standing), refusedFile: (path, chatInfo, chat) => control.refusedFile(path, chatInfo, chat), data, schedules}, mode)
+  const tools = new AgentTools({chat: chat.api(), user, actions, watch: new ChatItemsWatch(), controlChat: () => "#10", standingApprover: (chatInfo, standing) => control.standingApprover(chatInfo, standing), refusedFile: (path, chatInfo, chat) => control.refusedFile(path, chatInfo, chat), data, schedules, audio}, mode)
   const control: Control = new Control(chat.api(), group(10, "agent"), {displayName: "agent", owners, registerHint: "hint", qrCode: "small"}, actions, tools, schedules)
   await control.load()
   return {control, tools, schedules}
@@ -369,6 +370,23 @@ describe("receiving all files of a chat", () => {
     expect(await control.ownerCommand(alice, {keyword: "approve", params: "@4 files"})).toBe(commandsReply)
     expect(await control.ownerCommand(alice, {keyword: "revoke", params: "@4 files"})).toBe(commandsReply)
     expect(chat.customData).toEqual([])
+  })
+
+  it("lets the server download the voice messages of the chat at their arrival in mode requests only", async () => {
+    const errors = jest.spyOn(process.stderr, "write").mockImplementation(() => true)
+    for (const mode of ["requests", "host"] as const) {
+      const chat = agentChats()
+      const {contact: directory} = chatInfoOf(chat, "@4") as T.ChatInfo.Direct
+      directory.customData = {simplexMcpFiles: {approvedBy: "Alice", approvedById: 3, approvedAt: "2026-11-12T10:00:00.000Z"}}
+      const {tools} = await controlWith(chat, actionsWith(mode, fakeHooks()), undefined, mode, {url: "http://127.0.0.1:8080", stt: "stt", tts: "tts"})
+      const voice = fileItem(30, {type: "voice", text: "", duration: 12}, {type: "rcvInvitation"})
+      voice.file!.fileSize = 20_000
+      chat.chats.get("@4")!.items.push(voice)
+      tools.onNewItems([event(chatInfoOf(chat, "@4"), voice)])
+      await new Promise(resolve => setImmediate(resolve))
+      expect(chat.commands.filter(cmd => cmd.startsWith("/_get item info"))).toEqual(mode === "requests" ? ["/_get item info @4 30"] : [])
+    }
+    expect(errors.mock.calls.map(([line]) => line)).toEqual(["voice message of file 7: SimpleX error: unexpected response cmdOk\n"])
   })
 })
 
