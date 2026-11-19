@@ -8,8 +8,10 @@ You accept these Conditions of Use of SimpleX Names ("Names Conditions") by regi
 
 **What the registry allows**.
 
-- Changing the record of the name, creating subnames and transferring control of the name require your key.
-- A name is registered for the period stored in the registry and can be extended until 90 days after that period ends, at the price set at the time of extension. Once the period ends, control of the name cannot be transferred.
+- Changing the record of the name, creating subnames and transferring control of the name require your key. Only ending a registration in its dispute period removes its record and subnames without it.
+- A name is registered for the period stored in the registry. Once any dispute period has ended, the name can be extended until 90 days after the registration period ends, at the price set at the time of extension. Once the registration period ends, control of the name cannot be transferred.
+- A name that SimpleX Chat Ltd registers for you after an order has a dispute period of 14 to 120 days from its registration, stored in the registry. A name registered by your own Ethereum transaction has none. Before its dispute period ends, a registration can be ended, with its record and subnames, if it was made without a valid order, or if a payment used for it is disputed, reversed or refunded. The name is then available to anyone. A transfer does not end the dispute period.
+- If a payment for an extension, or a payment for a registration after its dispute period, is disputed, reversed or refunded, further extensions of the name can be refused.
 
 **You agree**:
 
