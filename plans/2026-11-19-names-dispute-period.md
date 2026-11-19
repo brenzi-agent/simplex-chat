@@ -18,10 +18,10 @@ A holder accepts docs/NAMES-CONDITIONS.md on chain. It states that changing a na
 
 The registry contracts change on simplex-network/ens-contracts, branch `ab/dispute-period`:
 
-- a name that SimpleX Chat Ltd registers for an order has a dispute period of 14 to 120 days, stored in the registry;
+- a registration through the store's registrar has a dispute period of 14 to 120 days, stored in the registry;
 - before it ends, the registry's guardian or admin can end the registration, with its record and subnames;
 - before it ends, the name cannot be extended;
-- a name registered by the holder's own Ethereum transaction has none.
+- a registration by the holder's own Ethereum transaction is not subject to a dispute period.
 
 The conditions would describe a registry that holders do not get.
 
@@ -29,16 +29,15 @@ The conditions would describe a registry that holders do not get.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> disputable: registered by SimpleX Chat Ltd, other than a reserved name
-  [*] --> final: registered by the holder's own Ethereum transaction, or a reserved name assigned by the registry's admin
+  [*] --> disputable: registered by SimpleX Chat Ltd
+  [*] --> final: registered by the holder's own Ethereum transaction
   disputable --> disputable: transferred
   disputable --> final: dispute period ends
-  disputable --> available: ended, without a valid order, or with a payment disputed, reversed or refunded in full
-  final --> final: extended, transferred
-  final --> no_extension: a payment for the name disputed, reversed or refunded in full
+  disputable --> available: ended on a ground the conditions state
+  final --> final: extended or transferred
+  disputable --> no_extension: a payment disputed, reversed or refunded in full, registration not ended
+  final --> no_extension: a payment disputed, reversed or refunded in full
   final --> available: 90 days after the registration period
-  no_extension --> reserved: 90 days after the registration period
-  reserved --> [*]: assigned by the registry's admin
   available --> [*]
 ```
 
@@ -48,13 +47,25 @@ docs/NAMES-CONDITIONS.md, section "What the registry allows":
 
 | Bullet | Change |
 |---|---|
-| your key | unchanged |
-| dispute period, new, second | which registrations have one, its length, what the registry allows before its end, the only grounds for ending, availability after, transfers |
-| period and extension | extension after the dispute period, if any; "the period" named "the registration period" |
-| refused extensions, new | after a payment for the name is disputed, reversed or refunded in full and its registration is not ended |
+| your key | the next point as its exception |
+| dispute period | new, second |
+| period and extension | after the dispute period, if any |
+| refused extensions | new, last |
 
-The other sections are unchanged. A separate change, for the registry's upgradeable contracts, edits the section "Registry"; the change merged second is rebased.
+The dispute period bullet states:
+
+- which registrations have one, and its length;
+- what the registry allows before its end;
+- the only grounds for ending a registration;
+- the name's availability after;
+- that a transfer leaves it unchanged.
+
+The other sections are unchanged. A separate change, for the registry's upgradeable contracts, edits the section "Registry"; the change merged second merges master.
 
 ## After the merge
 
-The name policy's general and community terms links are set to this file at the merge commit, in the same governance batch as `setSponsor` of the sponsor that takes `disputeDays`, so that every registration with a dispute period is made under this version.
+The name policy's general and community terms links are set to this file at the merge commit of the later of this change and the change for the upgradeable contracts:
+
+1. tagged `general-terms-vN` and `community-terms-vN`;
+2. mirrored on git.simplex.chat;
+3. set in the same governance batch as `setSponsor` of the sponsor that takes `disputeDays`, so that every registration with a dispute period is made under this version.
