@@ -29,14 +29,16 @@ The conditions would describe a registry that holders do not get.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> disputable: registered by SimpleX Chat Ltd after an order
-  [*] --> final: registered by your own Ethereum transaction
+  [*] --> disputable: registered by SimpleX Chat Ltd, other than a reserved name
+  [*] --> final: registered by the holder's own Ethereum transaction, or a reserved name assigned by the registry's admin
+  disputable --> disputable: transferred
   disputable --> final: dispute period ends
-  disputable --> available: ended, without a valid order, or with a payment disputed, reversed or refunded
-  final --> final: extended
-  final --> no_extension: an extension payment, or a registration payment after the dispute period, disputed, reversed or refunded
+  disputable --> available: ended, without a valid order, or with a payment disputed, reversed or refunded in full
+  final --> final: extended, transferred
+  final --> no_extension: a payment for the name disputed, reversed or refunded in full
   final --> available: 90 days after the registration period
-  no_extension --> available: 90 days after the registration period, when the name is assigned again
+  no_extension --> reserved: 90 days after the registration period
+  reserved --> [*]: assigned by the registry's admin
   available --> [*]
 ```
 
@@ -46,13 +48,13 @@ docs/NAMES-CONDITIONS.md, section "What the registry allows":
 
 | Bullet | Change |
 |---|---|
-| your key | ending a registration in its dispute period removes its record and subnames without the key |
-| period and extension | extension only once any dispute period has ended; "the period" named "the registration period" |
-| dispute period, new | who has one, its length, the grounds for ending, availability after, transfers |
-| refused extensions, new | after a disputed extension payment, or a registration payment disputed after its dispute period |
+| your key | unchanged |
+| dispute period, new, second | which registrations have one, its length, what the registry allows before its end, the only grounds for ending, availability after, transfers |
+| period and extension | extension after the dispute period, if any; "the period" named "the registration period" |
+| refused extensions, new | after a payment for the name is disputed, reversed or refunded in full and its registration is not ended |
 
-The other sections are unchanged.
+The other sections are unchanged. A separate change, for the registry's upgradeable contracts, edits the section "Registry"; the change merged second is rebased.
 
 ## After the merge
 
-The name policy's general and community terms links are set to this file at the merge commit, as for #8135.
+The name policy's general and community terms links are set to this file at the merge commit, in the same governance batch as `setSponsor` of the sponsor that takes `disputeDays`, so that every registration with a dispute period is made under this version.
