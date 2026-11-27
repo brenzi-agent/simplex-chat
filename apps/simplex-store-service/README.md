@@ -2022,7 +2022,8 @@ simplex.domains order <reference> refund <cents> <destination> <timestamp>
 
 - `reference`: the order's invoice id or its registration id; the names page signs the registration
   id only for an order without an invoice.
-- `cents`: the balance, in decimal without leading zeros.
+- `cents`: the refund's cents, in decimal without leading zeros: the balance, or for `//close` the
+  order's price with any money its balance already holds.
 - `destination`: `card` for an order paid by card, which Stripe refunds to the card that paid; for an
   order paid in Bitcoin or Monero, the address the buyer gives, as typed, one word other than `card`.
 - `timestamp`: in seconds, in decimal without leading zeros.
