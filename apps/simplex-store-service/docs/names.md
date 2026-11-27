@@ -505,7 +505,7 @@ Notes:
 
 ### 3.9 A balance refunded by support
 
-Support records the refund of a balance in the console and pays it back by hand.
+Support records the refund of a balance in the console, on the buyer's request signed with the order's name key, and pays it back by hand to the request's destination.
 
 ```mermaid
 sequenceDiagram
@@ -513,19 +513,21 @@ sequenceDiagram
   participant O as Support
   participant C as Console in run-cli mode
   participant D as PostgreSQL
-  B--)O: asks for a refund with the order's reference (outside the service)
+  B--)O: the refund request its page signed with the order's name key (outside the service)
   Note over O,C: the service is stopped, then run with --run-cli
   O->>C: //balance REFERENCE
   C->>D: order, balance, the money paid for it
-  C-->>O: balance, credited, refunded, paid by, the command to record it
-  O->>C: //record_refund REFERENCE CENTS
+  C-->>O: balance, credited, refunded, paid by, the reference and cents to record it
+  O->>C: //record_refund REFERENCE CENTS DESTINATION TIMESTAMP SIGNATURE
+  C->>D: the order of the reference, its owner the request's signer
   C->>D: under the balance's lock: amount 0, refunded raised by the cents
-  C-->>O: Recorded a refund ... Refund it now, by: PAYMENT.
-  O--)B: money paid back by hand (outside the service)
+  C-->>O: Recorded a refund ... Refund it now to DESTINATION, by: PAYMENT.
+  O--)B: money paid back by hand to the destination (outside the service)
 ```
 
 Notes:
 
+- A refund is recorded only on the request `simplex.domains order <reference> refund <cents> <destination> <timestamp>`, signed with EIP-191 by the order's owner, its destination `card` for a card payment and an address for a crypto payment, signed at most 30 days before the service's clock and at most 600 seconds after it. A request of another signer, or with a field changed after it was signed, is answered as one for an unknown reference; the other refusals record nothing ([`Names/Balances.hs`](../src/StoreService/Names/Balances.hs) `requestedOrder`, [`Names/Signatures.hs`](../src/StoreService/Names/Signatures.hs) `refundMessage`, [`Names/Orders.hs`](../src/StoreService/Names/Orders.hs) `signedWithin`).
 - The refund must equal the whole balance ([`Names/Balances.hs`](../src/StoreService/Names/Balances.hs) `recordRefund`, [`Names/Store.hs`](../src/StoreService/Names/Store.hs) `refundBalance`).
 - A balance is credited when a paid order is set `taken` or fails at the end of its month (its whole price), when support closes a failed order, and with late or extra money; it is spent only on a name selected for its own order after a reset (3.6), and on no other order ([`Names/Worker.hs`](../src/StoreService/Names/Worker.hs) `endOrder`, `refundTaken`, [`Names/LateCredits.hs`](../src/StoreService/Names/LateCredits.hs), [`Names/Orders.hs`](../src/StoreService/Names/Orders.hs) `selectName`).
 - The provider interface offers create, the refusal of an invoice it cannot make, read, cancel, list, rate and webhook verification, so the money is paid back by hand ([`Providers.hs:120-130`](../src/StoreService/Providers.hs#L120-L130)). The buyer's email to chat@simplex.chat is described in the README; the page code is in the submodule ([`README.md:1371-1411`](../README.md#L1371-L1411)).
@@ -541,21 +543,23 @@ sequenceDiagram
   participant C as Console in run-cli mode
   participant N as Ethereum node
   participant D as PostgreSQL
-  B--)O: asks for a refund of a failed order with its reference (outside the service)
+  B--)O: the refund request of a failed order its page signed with the order's name key (outside the service)
   Note over O,C: the service is stopped, then run with --run-cli
-  O->>C: //close REFERENCE
+  O->>C: //close REFERENCE CENTS DESTINATION TIMESTAMP SIGNATURE
+  C->>D: the order of the reference, its owner the request's signer
   C->>D: the order, under its name's lock
   C->>N: a mined register of the order, or the owner holding the name at the confirmation depth
   alt the register went through
     C->>D: order set registered, or ended when its registration was ended in its dispute period
     C-->>O: Nothing refunded: the register of order ID went through
   else not registered
-    C->>D: under the balance's lock, one transaction: order set taken, its stored reveal cleared, price credited, the whole balance recorded as refunded
-    C-->>O: Closed order ID, failed or lapsed unsigned at TIME ... Check at the provider ...#59; if not, refund it now, by: PAYMENT.
-    O--)B: money paid back by hand, unless refunded before (outside the service)
+    C->>D: under the balance's lock, one transaction: order set taken, its stored reveal cleared, price credited, the whole balance, the request's cents, recorded as refunded
+    C-->>O: Closed order ID, failed or lapsed unsigned at TIME ... Check at the provider ...#59; if not, refund it now to DESTINATION, by: PAYMENT.
+    O--)B: money paid back by hand to the destination, unless refunded before (outside the service)
   end
 ```
 
+- The request is the one `//record_refund` takes, refused alike. Its cents must be the whole balance the close records, the price with any money the balance already held; other cents roll the transaction back, recording nothing (`refundTaken` in [`Names/Worker.hs`](../src/StoreService/Names/Worker.hs)).
 - Only a failed or lapsed unsigned order paid by invoice is closed ([`Names/Worker.hs`](../src/StoreService/Names/Worker.hs) `closeRegistration`, `refundTaken`, [`Names/Orders.hs`](../src/StoreService/Names/Orders.hs) `checkLanded`). An order with a recorded dispute or refund of its payment is refused, writing nothing, as nothing is refunded (`reversalRecorded` in [`Names/Store.hs`](../src/StoreService/Names/Store.hs)).
 - The answer names the time of the failure or the lapse, as failed orders were refunded at the provider by hand before `//close` existed ([`Service.hs:463-485`](../src/StoreService/Service.hs#L463-L485), [`README.md:1491-1536`](../README.md#L1491-L1536)).
 
@@ -814,7 +818,7 @@ stateDiagram-v2
 | T23 | queued, committed or failed → failed, month ended | A calendar month passed since the selection of the order's name, and no register transaction of the order is pending. | The order is no longer live; a paid order's price is credited to its balance; a code is released; logged and reported (`endMonths`). |
 | T24 | taken → queued | The owner selects a name for the order, at any time, with a new order's checks: for a paid order, a name of its price; for a code order, a name no shorter than its code's length, its code not revoked, and unexpired or within a calendar month after `taken_at`. | A new commitment; the month starts again, `selected_at` the selection's time; a paid order's price is spent from its balance; a code order's code is reserved again; overdue orders of the same wallet and name are closed, and other buyers' open invoices of the name cancelled (`selectName`). |
 | T25 | failed → registered | At support's close, the service finds the order's register mined with status 1, or the owner holding the name. | As T16 (`closeRegistration`). |
-| T26 | failed, or committed past its window → taken | Support's `//close` of a paid order. | The order is reset; the price is credited to the balance, then recorded as refunded (`closeRegistration`). |
+| T26 | failed, or committed past its window → taken | Support's `//close` of a paid order, on its owner's signed refund request. | The order is reset; the price is credited to the balance, then recorded as refunded (`closeRegistration`). |
 | T27 | queued, committing, committed or failed → closed, reversed | A dispute or refund of the payment while no register transaction of the order's current name was saved. | The hold is released; nothing is credited (`reverseOrder`). |
 | T28 | committed or registering → ended | As T16 for a mined register, but the registrar's `disputeUntil(id)` at the confirmed block is not the end the register set: its block's time plus the order's dispute days. | The expiry and the dispute end the register set are stored; a code is spent; logged at note (`checkLanded`). |
 | T29 | failed → ended | At support's close, as T28. | As T28 (`closeRegistration`). |

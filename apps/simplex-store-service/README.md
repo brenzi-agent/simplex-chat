@@ -680,7 +680,8 @@ from some contacts. Before the service starts on it:
    [Check the balance and transactions in flight](#check-the-balance-and-transactions-in-flight)). The
    service numbers a new transaction after the key's mined transactions and the ones the copy saved,
    so a transaction in the pool that the copy does not hold can have the same nonce.
-2. Record again, with `//record_refund` in `--run-cli` or `/record_refund` in the group, each refund recorded after the copy: the copy holds
+2. Record again, with `//record_refund` in `--run-cli` or `/record_refund` in the group, each refund recorded after the copy, with the
+   buyer's request it was recorded with: the copy holds
    those balances unrefunded, so they could be refunded twice. The service logged each as
    `names: recorded a refund of <cents> cents for order <registration id>`.
 3. Revoke with `//revoke` each code spent or revoked after the copy, which the copy holds unspent, and
@@ -2011,27 +2012,37 @@ name first, or support closed the failed order with `//close`, which also record
 [Closing a failed order](#closing-a-failed-order)), when a payment reaches its invoice
 after the invoice closed, and when its invoice was paid more crypto than it asked (the extra). The
 balance of an order reset by a take is spent only when a name of the order's price is selected for that order,
-at any time, and on no other order. Otherwise the buyer asks for a balance back: the page tells them to
-write to chat@simplex.chat with the order's reference, which is its invoice id, or its registration
-id for an order without an invoice. Nothing is refunded automatically, and the service never learns
-where to send money. A reference is not proof of who paid: a registration id is in the service's
-logs, and the API answers a name order's reads only to requests signed with its name key, so ask
-the buyer for the order's name address too. Neither provider holds a name order's
+at any time, and on no other order. Otherwise the buyer asks for a balance back, and nothing is
+refunded automatically. A reference is not proof of who paid: a registration id is in the service's
+logs. So a refund is recorded only with a refund request signed with the order's name key, the key
+of its owner's name code:
+
+```
+simplex.domains order <reference> refund <cents> <destination> <timestamp>
+```
+
+- `reference` is the order's invoice id, or its registration id for an order without an invoice;
+  `cents` is the balance; `destination` is `card` for an order paid by card, which Stripe refunds to
+  the card that paid, and the address the buyer gives for an order paid in Bitcoin or Monero, as
+  typed; `timestamp` is in seconds.
+- It is signed as the order requests are, with EIP-191 `personal_sign`; the signature is `0x` and
+  130 lowercase hex digits, with s in the lower half of the group order and v 27 or 28.
+- The names page signs it and gives the buyer one line to send to chat@simplex.chat:
+  `refund <reference> <cents> <destination> <timestamp> <signature>`.
+
+Neither provider holds a name order's
 reference: its Stripe payment carries `name:0x<order hash>`, and its BTCPay invoice nothing of the
-order, while a badge order's Stripe payment carries its invoice id. Only a card refund
-is safe on the reference alone, as Stripe returns it to
-the card that paid; a crypto refund goes to an address the buyer gives, which nothing here ties to
-the order. Support records each refund in `--run-cli` mode with the service stopped, like the other
+order, while a badge order's Stripe payment carries its invoice id. Support records each refund in `--run-cli` mode with the service stopped, like the other
 `//` commands, or in the group while the service runs (see [Balances and failed orders in the
 group](#balances-and-failed-orders-in-the-group)):
 
 ```
 //balance <reference>
-//record_refund <reference> <cents>
+//record_refund <reference> <cents> <destination> <timestamp> <signature>
 ```
 
-1. Run `//balance <reference>` with the reference the buyer sent. It records nothing and answers the
-   balance, what paid for it and the command that records its refund:
+1. Run `//balance <reference>` with the reference of the buyer's request. It records nothing and answers the
+   balance, what paid for it and the reference and cents of the command that records its refund:
 
    ```
    Order <id>: balance $100.00 (credited $100.00, refunded $0.00). Paid by: order <id> of <owner>: $100.00 by btc on invoice <invoice id> (provider reference <provider reference>). To record its refund: //record_refund <reference> 10000
@@ -2043,16 +2054,25 @@ group](#balances-and-failed-orders-in-the-group)):
    invoice that paid the order. The provider
    reference is the BTCPay invoice id or the Stripe PaymentIntent id, which finds the payment in the
    provider's Dashboard.
-2. Run the command the answer ends with. The cents must equal the whole balance: a refund zeroes it,
-   and part of a balance is never refunded. Other cents record nothing, and the answer gives the
-   balance.
-3. The answer, `Recorded a refund of $100.00 for order <id>. Refund it now, by: …`, repeats what
-   paid. Pay the balance's amount in US dollars back now, by the method it lists. The refund is
+2. Run `//record_refund` with the buyer's line after its first word. The service recovers the
+   request's signer, and records the refund only when:
+   - the signer is the order's owner; a request signed by another key, or with a field changed after
+     it was signed, is answered as one for an unknown reference;
+   - the destination is `card` for an order paid by card, and an address for an order paid in crypto;
+     an order paid with a prepaid code is refunded nothing;
+   - the cents equal the whole balance: a refund zeroes it, and part of a balance is never refunded.
+     Other cents record nothing, and the answer gives the balance;
+   - the request was signed at most 30 days before the service's clock and at most 600 seconds
+     after it; the buyer signs a new one in place of an older one.
+3. The answer, `Recorded a refund of $100.00 for order <id>. Refund it now to <destination>, by: …`,
+   names the request's destination, `the card` or the buyer's address, and repeats what paid. Pay
+   the balance's amount in US dollars back now, to that destination. The refund is
    recorded first so that the money is not spent on a selection of a name while it is paid back. The service logs
    each recorded refund at note with the order's registration id and the cents.
 
-The commands also answer when the reference matches no order, when the order has no balance, and
-when the cents are not the balance. A refunded balance shows `amount` 0 and its `refunded` total in
+The commands also answer when the reference matches no order, when the order has no balance, when
+the cents are not the balance, and when the request is refused as above; an unsigned command gets the
+usage reply. A refunded balance shows `amount` 0 and its `refunded` total in
 Your names; a later late payment credits it again, and a second refund adds to `refunded`.
 
 ## Closing a failed order
@@ -2069,10 +2089,12 @@ order before then in `--run-cli` mode with the service stopped, or with `/close`
 it runs; a month-ended order is refused, and its refund is recorded with `//record_refund`:
 
 ```
-//close <reference>
+//close <reference> <cents> <destination> <timestamp> <signature>
 ```
 
-The reference is the order's invoice id, or its registration id. The command reads the chain, so it
+The command takes the buyer's refund request, as `//record_refund` does, refused as that command
+refuses it, with the cents of the refund the close records: the order's price, with any overpayment
+or late money its balance already holds. The command reads the chain, so it
 needs `[names]` and `[chain]` in `store_service.ini`; without `[names]` it answers that names are not
 enabled. It:
 
@@ -2081,11 +2103,12 @@ enabled. It:
    change is logged at note with its registration id;
 2. otherwise, in one transaction, sets the order `taken`, clears its stored signatures, credits its
    price to its balance, which may already hold an overpayment or late money, and records all
-   of that balance as refunded, as `//record_refund` does.
+   of that balance as refunded, as `//record_refund` does; when that balance is not the request's
+   cents, it records nothing, and the answer gives the balance.
 
 The answer, `Closed order <id>, failed or lapsed unsigned at <time>, as taken and recorded a refund of $100.00. Check at
-the provider that it was not refunded by hand before; if not, refund it now, by: …`, lists what paid
-for the order, as the answer of `//record_refund` does. Before this command existed, support refunded failed
+the provider that it was not refunded by hand before; if not, refund it now to <destination>, by: …`, names the
+request's destination and lists what paid for the order, as the answer of `//record_refund` does. Before this command existed, support refunded failed
 orders at the provider by hand, so look for a refund of that payment after the failure time first, and
 pay the amount back by those methods only if none is found. The service logs each closed order at
 note with its registration id and the cents.
@@ -2115,8 +2138,8 @@ slash:
 
 ```
 /balance <reference>
-/record_refund <reference> <cents>
-/close <reference>
+/record_refund <reference> <cents> <destination> <timestamp> <signature>
+/close <reference> <cents> <destination> <timestamp> <signature>
 ```
 
 The service answers each in the group with the console's answer, which names `/record_refund` and
@@ -2127,7 +2150,7 @@ chain node delays the group's other replies by up to its three reads' timeouts. 
 start with `[names]`, and without `[names]` answers that names are not enabled.
 
 A member below owner gets no reply and nothing runs; a malformed command from an owner gets the usage
-reply. The reference and the answer, with the order and invoice id that paid, are read by every
+reply. The request, with the buyer's address, and the answer, with the order and invoice id that paid, are read by every
 member and kept in the service's chat database, as codes are, so the group's members must be people
 who may see them. A command the service received but had not run when it stopped is dropped with no
 reply; run it again.
@@ -2179,7 +2202,8 @@ the Stripe key, so the dev server shows its stand-in card form. Its controls:
 
 After each change at a provider, the runner sends the service that provider's webhook and answers
 once the service has read the change, its late money credited. `/control/refund/<invoice or
-registration>` `{"cents"}` runs support's `//record_refund` for those cents or the whole balance, and
+registration>` `{"cents"}` records the refund of those cents or of the whole balance in the store, as
+support's `//record_refund` records it from the buyer's signed request, which these cases do not make, and
 `/control/take` holds these controls until the name is the holder's. Any other
 `/control/` answers `501`, which fails the case that sends it; `EXCLUDED` in the script names each case
 that cannot run against the service, with the reason.
