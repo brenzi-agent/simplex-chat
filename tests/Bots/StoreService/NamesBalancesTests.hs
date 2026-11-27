@@ -35,7 +35,7 @@ import Simplex.Messaging.SimplexName (labelHash)
 import Simplex.Messaging.Util (safeDecodeUtf8)
 import StoreService.Config (StripeConfig (..))
 import StoreService.Names.Balances
-import StoreService.Names.Orders (OrdersEnv (..))
+import StoreService.Names.Orders (OrdersEnv (..), refundRequestSeconds, signedWithin)
 import StoreService.Names.Chain (Hex32 (..), TxHash (..))
 import StoreService.Names.Phases (RegistrationId (..))
 import StoreService.Names.Signatures (OrderFields (..), RefundDestination (..), RefundRequest (..), personalDigest, refundMessage)
@@ -74,6 +74,7 @@ namesBalancesTests = describe "StoreService names: balances" $ do
     it "returns the 50 newest orders and then every older one holding a balance above 0" testFindBalances
   describe "refunds" $ do
     it "refuses no order, no balance and another amount, then records one with the order's payment" testRecordRefund
+    it "takes a refund request signed at most 30 days before the clock and at most 600 seconds after it" testRefundWindow
     it "words the order with its payment and late or overpaid cents" testLinkText
   describe "late credits" $ do
     it "credits a late payment once per credit number, a taken number changing neither the rows nor the balance" testCreditLatePayment
@@ -334,6 +335,14 @@ testRecordRefund = withServiceStore $ \st -> do
   figures st "s" `shouldReturn` Just (0, 10000, 10000)
   refundOf "s" 10000 t0 `shouldReturn` Left (RefundAmount 0)
   timeout 5000000 (withBalanceTurn turns (RegistrationId "s") $ pure ()) `shouldReturn` Just ()
+
+testRefundWindow :: IO ()
+testRefundWindow = do
+  let secondsFrom offset = fromIntegral (floor (utcTimeToPOSIXSeconds t0) + offset :: Integer)
+      within = map (signedWithin refundRequestSeconds t0 . secondsFrom)
+  within [-30 * 86400, 0, 600] `shouldBe` [True, True, True]
+  within [-30 * 86400 - 1, 601] `shouldBe` [False, False]
+  signedWithin refundRequestSeconds t0 maxBound `shouldBe` False
 
 testLinkText :: IO ()
 testLinkText = do

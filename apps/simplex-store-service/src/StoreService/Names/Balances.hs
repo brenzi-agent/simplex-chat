@@ -77,22 +77,19 @@ refundsTo payment destination = case (payment, destination) of
 
 -- | The reference is the order's registration id or its name invoice's id. In the balance's turn and one transaction.
 recordRefund :: Turns -> DBStore -> RefundRequest -> UTCTime -> IO (Either RefundRefusal RefundRecord)
-recordRefund turns st req@RefundRequest {rqReference = ref, rqCents = cents} now =
+recordRefund turns st req@RefundRequest {rqCents = cents} now =
   requestedOrder st now req >>= \case
     Left refused -> pure $ Left $ RefundRequestRefused refused
     Right Nothing -> pure $ Left RefundNoOrder
-    Right (Just NameRegistration {nrId}) -> withBalanceTurn turns nrId $ withTransaction st refund
+    Right (Just NameRegistration {nrId}) -> withBalanceTurn turns nrId $ withTransaction st $ refund nrId
   where
-    refund db =
-      refundable db $ \rid@(RegistrationId r) ->
+    refund rid@(RegistrationId r) db =
+      refundable db rid $
         refundBalance db rid cents now >>= \case
           True -> Right . RefundRecord rid cents <$> balanceLink db rid
           -- only a writer outside the turn, as a late credit, changes the balance between the read and the write, so it is read again once
-          False -> refundable db $ \_ -> E.throwIO $ BrokenInvariant $ "the refund of order " <> r <> " was refused, though its balance reads refundable"
-    refundable db refundWith =
-      balanceByReference db ref >>= \case
-        Nothing -> pure $ Left RefundNoOrder
-        Just (rid, balance) -> maybe (refundWith rid) (pure . Left) (refusal balance)
+          False -> refundable db rid $ E.throwIO $ BrokenInvariant $ "the refund of order " <> r <> " was refused, though its balance reads refundable"
+    refundable db rid refundWith = getBalance db rid >>= maybe refundWith (pure . Left) . refusal
     refusal :: Maybe Balance -> Maybe RefundRefusal
     refusal = \case
       Nothing -> Just RefundNoBalance

@@ -269,7 +269,7 @@ checkTimestamp now timestamp =
   unless (signedWithin signedRequestSeconds now timestamp) $ Left $ ORBadRequest "the timestamp is outside the window"
 
 signedWithin :: Integer -> UTCTime -> Word64 -> Bool
-signedWithin before now timestamp = age <= fromInteger before && negate age <= fromInteger signedRequestSeconds
+signedWithin maxAge now timestamp = age <= fromInteger maxAge && negate age <= fromInteger signedRequestSeconds
   where
     age = diffUTCTime now $ roundedToUTCTime $ RoundedSystemTime $ fromIntegral timestamp
 

@@ -50,7 +50,7 @@ import StoreService.Names.Balances (RefundRecord (..), RefundRefusal (..), Reque
 import StoreService.Names.Chain (ChainClient, newChainClient, nodeChainId)
 import StoreService.Names.Contracts (Contracts, Terms (..), communityName, namePolicy, newContracts, runTermsFetch, termsLinks)
 import StoreService.Names.Env (NamesEnv (..), newNamesEnv)
-import StoreService.Names.Orders (ordersEnv, refundRequestSeconds)
+import StoreService.Names.Orders (ordersEnv, refundRequestSeconds, signedRequestSeconds)
 import StoreService.Names.Phases (RegistrationId (..))
 import StoreService.Names.Records (runRecordEdits)
 import StoreService.Names.Sender (checkPendingSignatures, runSender)
@@ -468,7 +468,9 @@ refundBalanceCmd turns ChatController {chatStore} req@RefundRequest {rqReference
 
 requestRefusalText :: RequestRefusal -> T.Text
 requestRefusalText = \case
-  RQOutsideWindow -> "the request was signed more than " <> tshow (refundRequestSeconds `div` 86400) <> " days ago or ahead of the service's clock; ask the buyer to sign a new one"
+  RQOutsideWindow ->
+    "the request was signed more than " <> tshow (refundRequestSeconds `div` 86400) <> " days before the service's clock or more than "
+      <> tshow (signedRequestSeconds `div` 60) <> " minutes after it; ask the buyer to sign a new one"
   RQDestination (OPInvoice SPMCard {} _) -> "the order was paid by card, which is refunded to its card, not to an address"
   RQDestination (OPInvoice method _) -> "the order was paid by " <> textEncode method <> ", which is refunded to an address the buyer gives, not to a card"
   RQDestination (OPCode _) -> "the order was paid with a prepaid code, so nothing is refunded"

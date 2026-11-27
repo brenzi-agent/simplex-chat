@@ -548,7 +548,7 @@ buyerAddress = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
 otherAddress = "bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3"
 
 outsideWindow :: Text
-outsideWindow = "the request was signed more than 30 days ago or ahead of the service's clock; ask the buyer to sign a new one"
+outsideWindow = "the request was signed more than 30 days before the service's clock or more than 10 minutes after it; ask the buyer to sign a new one"
 
 recordRefundUsage, closeUsage :: Text
 recordRefundUsage = "Usage: //record_refund <reference> <cents> <destination> <timestamp> <signature>"
