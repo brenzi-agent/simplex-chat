@@ -2020,8 +2020,7 @@ refund request signed with the order's name key, the key of its owner's name cod
 simplex.domains order <reference> refund <cents> <destination> <timestamp>
 ```
 
-- `reference`: the order's invoice id or its registration id; the names page signs the registration
-  id only for an order without an invoice.
+- `reference`: the order's invoice id or its registration id.
 - `cents`: the refund's cents, in decimal without leading zeros: the balance, or for `//close` the
   order's price with any money its balance already holds.
 - `destination`: `card` for an order paid by card, which Stripe refunds to the card that paid; for an
@@ -2032,10 +2031,10 @@ simplex.domains order <reference> refund <cents> <destination> <timestamp>
 - The names page signs it and gives the buyer one line to send to chat@simplex.chat:
   `refund <reference> <cents> <destination> <timestamp> <signature>`.
 
-Neither provider holds a name order's
-reference: its Stripe payment carries `name:0x<order hash>`, and its BTCPay invoice nothing of the
-order, while a badge order's Stripe payment carries its invoice id. Support records each refund in `--run-cli` mode with the service stopped, like the other
-`//` commands, or in the group while the service runs (see [Balances and failed orders in the
+Neither provider holds a name order's reference: its Stripe payment carries `name:0x<order hash>`,
+and its BTCPay invoice nothing of the order, while a badge order's Stripe payment carries its invoice
+id. Support records each refund in `--run-cli` mode with the service stopped, like the other `//`
+commands, or in the group while the service runs (see [Balances and failed orders in the
 group](#balances-and-failed-orders-in-the-group)):
 
 ```
