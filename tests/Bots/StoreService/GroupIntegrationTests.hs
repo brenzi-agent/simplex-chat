@@ -14,10 +14,11 @@ import StoreService.Config (BadgeIssuerKey (..), ChainConfig (cChainId, cControl
 import StoreService.Group (GroupAction (..), GroupEvent (..), codeInTracker, ensureManagedGroup, fmtTime, joinerAcceptance)
 import StoreService.Group.Command (maxUses)
 import StoreService.Names.Codes (issueNameCode, prepaidCodeHash, revokeNameCode)
-import StoreService.Names.Abi (addressWord, selector, uint256)
+import StoreService.Names.Abi (addressWord, hex, selector, uint256)
 import StoreService.Names.Chain (Hex32 (..), SignedTx (..), TxHash (..), newChainClient, signTransaction)
 import StoreService.Names.Phases (RegistrationId (..))
-import StoreService.Names.Store (CmdSource (..), FailReason (..), NamePhase (PEnded), NameRegistration (nrPhase), NewTransaction (..), OrderPhase (OFailed), PrepaidCode (..), RegistrationTx (..), TxFor (..), TxSettlement (..), TxStatus (..), VersionWrite (Written), getPrepaidCode, insertTransaction, namePhase, recordTransactionOutcome, reservePrepaidCode, spendLandedPrepaidCode)
+import StoreService.Names.Signatures (personalDigest)
+import StoreService.Names.Store (CmdSource (..), FailReason (..), NamePhase (PEnded), NameRegistration (nrPhase), NewTransaction (..), OrderPhase (OFailed, OTaken), PrepaidCode (..), RegistrationTx (..), TxFor (..), TxSettlement (..), TxStatus (..), VersionWrite (Written), getPrepaidCode, insertTransaction, namePhase, recordTransactionOutcome, reservePrepaidCode, spendLandedPrepaidCode)
 import StoreService.Names.Turns (newTurns, withCodeTurn)
 import StoreService.Names.View (addressText)
 import StoreService.Options (StoreServiceOpts (..))
@@ -31,6 +32,7 @@ import Bots.StoreService.NamesContractsTests (nameExpiresCall, rentPriceAnswer, 
 import Bots.StoreService.WebTests (answerOf, blockedInSTM, capturingStderr, digestFixture, refusedWith, siteConfigJson, statusOf)
 import Bots.StoreService.NamesSearchTests (aliceHex)
 import qualified Bots.StoreService.NamesBalancesTests as Balances
+import Bots.StoreService.NamesOrdersTests (keyA, keyB)
 import Bots.StoreService.NamesStoreTests (issue, order, ownerA, placeCode, placePaid, reg, t0, usable, write)
 import Bots.StoreService.NamesOwnerTests (labelBytes, ownerOfSelector)
 import ChatClient
@@ -58,7 +60,9 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (NominalDiffTime, UTCTime (..), addUTCTime, getCurrentTime)
+import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import Data.Time.Format (defaultTimeLocale, formatTime)
+import Data.Word (Word64)
 import Network.HTTP.Client (RequestBody (..), defaultManagerSettings, httpLbs, method, newManager, parseRequest, requestBody, requestHeaders, responseBody, responseHeaders)
 import Network.Socket (Family (..), SockAddr (..), SocketType (..), close, connect, defaultProtocol, socket, tupleToHostAddress)
 import Simplex.Chat.Badges (BadgeType (..))
@@ -79,8 +83,9 @@ import Simplex.Messaging.Agent.Protocol (AConnShortLink (..), ConnShortLink (..)
 import Simplex.Messaging.Agent.Store.Common (withTransaction)
 import qualified Simplex.Messaging.Agent.Store.DB as DB
 import qualified Simplex.Messaging.Crypto as C
-import Simplex.Messaging.Crypto.Secp256k1 (mkPrivateKey)
+import Simplex.Messaging.Crypto.Secp256k1 (Secp256k1PrivateKey, mkPrivateKey, signRecoverable)
 import Simplex.Messaging.Crypto.BBS (bbsKeyGen)
+import Simplex.Messaging.Encoding (Encoding (..))
 import Simplex.Messaging.Encoding.String (strDecode)
 import Simplex.Messaging.Eth.Transaction (Eip1559Tx (..))
 import Simplex.Messaging.Util (tshow)
@@ -504,11 +509,11 @@ testRevokeTakesCodeTurn ps = do
 
 namesRefundChatTests :: SpecWith TestParams
 namesRefundChatTests = describe "StoreService names: operator refund" $ do
-  it "shows a balance with what paid for it, and records refunds by registration or invoice id, adding them up" testRefundRecorded
-  it "refuses an unknown reference, an order without a balance and another amount, and answers the usage to a malformed command" testRefundRefusals
+  it "shows a balance with what paid for it, and records refunds its owner signed by registration or invoice id, up to 30 days old, adding them up and naming the signed destination" testRefundRecorded
+  it "refuses an unknown reference, an order without a balance, another amount, another signer, a request changed after its signature, a destination its payment is not refunded to and a request outside its window, and answers the usage to an unsigned or malformed command" testRefundRefusals
   it "answers an owner's /balance, /record_refund and /close in the group, worded for the group, refusing as the console does" testGroupMoneyCmds
-  it "closes a failed paid order by its invoice id, recording the refund of its price, refuses an unknown reference and an order no longer failed, and answers an order whose registration was ended as ended" testCloseRecorded
-  it "refuses //close and //issue name without [names], and answers the usage to a malformed //close" testCloseNamesOff
+  it "closes a failed paid order on its owner's request by its invoice id, recording the refund of its price to the signed destination, refuses an unknown reference, another signer, a changed request, other cents, another destination kind, a stale request and an order no longer failed, and answers an order whose registration was ended as ended" testCloseRecorded
+  it "refuses //close and //issue name without [names], and answers the usage to an unsigned or malformed //close" testCloseNamesOff
 
 balanceRaw :: HasCallStack => ChatController -> Text -> IO (Either Text Text)
 balanceRaw cc args = operatorCmd cc ("//balance " <> args)
@@ -519,6 +524,44 @@ recordRefundRaw cc args = operatorCmd cc ("//record_refund " <> args)
 closeRaw :: HasCallStack => ChatController -> Text -> IO (Either Text Text)
 closeRaw cc args = operatorCmd cc ("//close " <> args)
 
+data Refund = Refund {rfRef :: Text, rfCents :: Int, rfTo :: Text, rfAt :: Word64}
+
+refundArgs :: Refund -> Text -> Text
+refundArgs Refund {rfRef, rfCents, rfTo, rfAt} sig = T.unwords [rfRef, tshow rfCents, rfTo, tshow rfAt, sig]
+
+refundSignature :: Secp256k1PrivateKey -> Refund -> IO Text
+refundSignature key Refund {rfRef, rfCents, rfTo, rfAt} = do
+  g <- C.newRandom
+  hex . smpEncode . either error id <$> signRecoverable g key (personalDigest $ encodeUtf8 $ T.unwords ["simplex.domains", "order", rfRef, "refund", tshow rfCents, rfTo, tshow rfAt])
+
+signedBy :: Secp256k1PrivateKey -> Refund -> IO Text
+signedBy key r = refundArgs r <$> refundSignature key r
+
+nowSeconds :: IO Word64
+nowSeconds = floor . utcTimeToPOSIXSeconds <$> getCurrentTime
+
+daySeconds :: Word64
+daySeconds = 86400
+
+buyerAddress, otherAddress :: Text
+buyerAddress = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+otherAddress = "bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3"
+
+outsideWindow :: Text
+outsideWindow = "the request was signed more than 30 days ago or ahead of the service's clock; ask the buyer to sign a new one"
+
+recordRefundUsage, closeUsage :: Text
+recordRefundUsage = "Usage: //record_refund <reference> <cents> <destination> <timestamp> <signature>"
+closeUsage = "Usage: //close <reference> <cents> <destination> <timestamp> <signature>"
+
+cardSource :: ChatController -> Text -> IO ()
+cardSource cc r = do
+  let st = chatStore cc
+  Balances.placeOrderRow st r True 10000 (addUTCTime 3600 t0)
+  ordered <- reg st r
+  write st ordered {nrPhase = OTaken t0} `shouldReturn` Written 2
+  Balances.credit st r 10000
+
 testCloseRecorded :: HasCallStack => TestParams -> IO ()
 testCloseRecorded ps = withFakeEthNode $ \node@FakeEthNode {fnUrl} -> do
   svc <- prepareGroupService ps
@@ -528,21 +571,36 @@ testCloseRecorded ps = withFakeEthNode $ \node@FakeEthNode {fnUrl} -> do
     pollUntilTrue (listening port)
     let st = chatStore cc
         paidBy = paidByBtc "f"
+        refusedAs reason args = closeRaw cc args `shouldReturn` Left ("Nothing recorded: " <> reason <> ".")
     now <- getCurrentTime
     Balances.placeOrderRow st "f" False 10000 (addUTCTime 3600 now)
     unpaid <- reg st "f"
     write st unpaid {nrPhase = OFailed t0 FRRegistryRefused} `shouldReturn` Written 2
     answerCall node registrar (ownerOfSelector <> labelBytes "f") $ Reverts ""
-    closeRaw cc "nothing" `shouldReturn` Left "Nothing recorded: no order has the reference nothing."
+    signedNow <- nowSeconds
+    let failed = Refund {rfRef = "inv-f", rfCents = 10000, rfTo = buyerAddress, rfAt = signedNow}
+        ownerCloses ref = signedBy keyA failed {rfRef = ref} >>= closeRaw cc
+    signedBy keyA failed {rfRef = "nothing"} >>= refusedAs "no order has the reference nothing"
+    signedBy keyB failed >>= refusedAs "no order has the reference inv-f"
+    sig <- refundSignature keyA failed
+    refusedAs "no order has the reference inv-f" (refundArgs failed {rfTo = otherAddress} sig)
+    signedBy keyA failed {rfCents = 9000} >>= refusedAs "the close records a refund of $100.00, not $90.00"
+    signedBy keyA failed {rfTo = "card"} >>= refusedAs "the order was paid by btc, which is refunded to an address the buyer gives, not to a card"
+    signedBy keyA failed {rfAt = signedNow - 30 * daySeconds - 120} >>= refusedAs outsideWindow
+    closeRaw cc "inv-f" `shouldReturn` Left closeUsage
+    nrPhase <$> reg st "f" `shouldReturn` OFailed t0 FRRegistryRefused
+    Balances.figures st "f" `shouldReturn` Nothing
     logs <- capturingStderr $
-      closeRaw cc "inv-f"
+      closeRaw cc (refundArgs failed sig)
         `shouldReturn` Right
-          ( "Closed order f, failed or lapsed unsigned at " <> minuteText t0 <> ", as taken and recorded a refund of $100.00. Check at the provider that it was not refunded by hand before; if not, refund it now, by: "
+          ( "Closed order f, failed or lapsed unsigned at " <> minuteText t0 <> ", as taken and recorded a refund of $100.00. Check at the provider that it was not refunded by hand before; if not, refund it now to "
+              <> buyerAddress
+              <> ", by: "
               <> paidBy
               <> "."
           )
     logs `shouldSatisfy` T.isInfixOf "names: closed order f and recorded a refund of 10000 cents"
-    closeRaw cc "f" `shouldReturn` Left "Nothing recorded: the order of f is not a failed or lapsed unsigned order paid by invoice."
+    ownerCloses "f" `shouldReturn` Left "Nothing recorded: the order of f is not a failed or lapsed unsigned order paid by invoice."
     Balances.figures st "f" `shouldReturn` Just (0, 10000, 10000)
     balanceRaw cc "f" `shouldReturn` Right ("Order f: balance $0.00 (credited $100.00, refunded $100.00). Paid by: " <> paidBy <> ". Nothing to refund.")
     Balances.placeOrderRow st "g" False 10000 (addUTCTime 3600 now)
@@ -551,7 +609,7 @@ testCloseRecorded ps = withFakeEthNode $ \node@FakeEthNode {fnUrl} -> do
     answerCall node registrar (ownerOfSelector <> labelBytes "g") $ Returns $ addressWord ownerA
     answerCall node registrar (selector "nameExpires(uint256)" <> labelBytes "g") $ Returns $ uint256 (2000000000 :: Int)
     answerCall node registrar (selector "disputeUntil(uint256)" <> labelBytes "g") $ Returns $ uint256 (0 :: Int)
-    registeredLogs <- capturingStderr $ closeRaw cc "inv-g" `shouldReturn` Left "Nothing refunded: the register of order g went through, so the order is registered now."
+    registeredLogs <- capturingStderr $ ownerCloses "inv-g" `shouldReturn` Left "Nothing refunded: the register of order g went through, so the order is registered now."
     registeredLogs `shouldSatisfy` T.isInfixOf "names: order g set registered by //close, as its register went through"
     Balances.figures st "g" `shouldReturn` Nothing
     Balances.placeOrderRow st "e" False 10000 (addUTCTime 3600 now)
@@ -563,7 +621,7 @@ testCloseRecorded ps = withFakeEthNode $ \node@FakeEthNode {fnUrl} -> do
     replicateM_ 2 $ mine node []
     answerCall node registrar (selector "nameExpires(uint256)" <> labelBytes "e") $ Returns $ uint256 (2000000000 :: Int)
     answerCall node registrar (selector "disputeUntil(uint256)" <> labelBytes "e") $ Returns $ uint256 (0 :: Int)
-    endedLogs <- capturingStderr $ closeRaw cc "inv-e" `shouldReturn` Left "Nothing refunded: the register of order e went through and its registration was ended in its dispute period, so the order is ended now."
+    endedLogs <- capturingStderr $ ownerCloses "inv-e" `shouldReturn` Left "Nothing refunded: the register of order e went through and its registration was ended in its dispute period, so the order is ended now."
     endedLogs `shouldSatisfy` T.isInfixOf "names: registration e set ended: disputeUntil(id) read at the confirmed block is 0, not its register's end "
     namePhase . nrPhase <$> reg st "e" `shouldReturn` PEnded
     Balances.figures st "e" `shouldReturn` Nothing
@@ -574,27 +632,37 @@ testGroupMoneyCmds ps = withFakeEthNode $ \node@FakeEthNode {fnUrl} -> do
   let registrar = address $ encodeUtf8 registrarAddr
   runWithOwner svc {gsIniSections = "" : namesSection <> withRpcUrl (T.pack fnUrl)} $ \cc _ _ alice -> do
     let st = chatStore cc
+        sent cmd args = replyTo cc alice (T.unpack $ cmd <> " " <> args)
     now <- getCurrentTime
     Balances.placeOrderRow st "s" False 10000 (addUTCTime 3600 now)
     unpaid <- reg st "s"
     write st unpaid {nrPhase = OFailed t0 FRRegistryRefused} `shouldReturn` Written 2
     answerCall node registrar (ownerOfSelector <> labelBytes "s") $ Reverts ""
-    replyTo cc alice "/close nothing" `shouldReturn` "Nothing recorded: no order has the reference nothing."
-    replyTo cc alice "/close inv-s"
-      `shouldReturn` ("Closed order s, failed or lapsed unsigned at " <> minuteText t0 <> ", as taken and recorded a refund of $100.00. Check at the provider that it was not refunded by hand before; if not, refund it now, by: " <> paidByBtc "s" <> ".")
+    signedNow <- nowSeconds
+    let failed = Refund {rfRef = "inv-s", rfCents = 10000, rfTo = buyerAddress, rfAt = signedNow}
+    unknown <- signedBy keyA failed {rfRef = "nothing"}
+    sent "/close" unknown `shouldReturn` "Nothing recorded: no order has the reference nothing."
+    replyTo cc alice "/close inv-s" `shouldReturn` "Usage: /close <reference> <cents> <destination> <timestamp> <signature>"
+    closed <- signedBy keyA failed
+    sent "/close" closed
+      `shouldReturn` ("Closed order s, failed or lapsed unsigned at " <> minuteText t0 <> ", as taken and recorded a refund of $100.00. Check at the provider that it was not refunded by hand before; if not, refund it now to " <> buyerAddress <> ", by: " <> paidByBtc "s" <> ".")
     Balances.credit st "s" 2505
     replyTo cc alice "/balance s"
       `shouldReturn` ("Order s: balance $25.05 (credited $125.05, refunded $100.00). Paid by: " <> paidByBtc "s" <> ". To record its refund: /record_refund s 2505")
-    replyTo cc alice "/record_refund inv-s 2500" `shouldReturn` "Nothing recorded: the balance is $25.05 now, not $25.00."
-    replyTo cc alice "/record_refund inv-s 2505" `shouldReturn` ("Recorded a refund of $25.05 for order s. Refund it now, by: " <> paidByBtc "s" <> ".")
+    short <- signedBy keyA failed {rfCents = 2500}
+    sent "/record_refund" short `shouldReturn` "Nothing recorded: the balance is $25.05 now, not $25.00."
+    rest <- signedBy keyA failed {rfCents = 2505}
+    sent "/record_refund" rest `shouldReturn` ("Recorded a refund of $25.05 for order s. Refund it now to " <> buyerAddress <> ", by: " <> paidByBtc "s" <> ".")
     Balances.figures st "s" `shouldReturn` Just (0, 12505, 12505)
 
 testCloseNamesOff :: HasCallStack => TestParams -> IO ()
 testCloseNamesOff ps = withStoreService ps $ \_ _ cc -> do
   Balances.source (chatStore cc) "s" 10000
-  closeRaw cc "s" `shouldReturn` Left "Names are not enabled on this service."
+  signedNow <- nowSeconds
+  request <- signedBy keyA Refund {rfRef = "s", rfCents = 10000, rfTo = buyerAddress, rfAt = signedNow}
+  closeRaw cc request `shouldReturn` Left "Names are not enabled on this service."
   issueRaw cc "name 6" `shouldReturn` Left "Names are not enabled on this service, so name codes cannot be issued."
-  forM_ ["", "s junk"] $ \args -> (args,) <$> closeRaw cc args `shouldReturn` (args, Left "Usage: //close <reference>")
+  forM_ ["", "s", "s junk"] $ \args -> (args,) <$> closeRaw cc args `shouldReturn` (args, Left closeUsage)
   Balances.figures (chatStore cc) "s" `shouldReturn` Just (10000, 10000, 0)
 
 minuteText :: UTCTime -> Text
@@ -604,35 +672,76 @@ testRefundRecorded :: HasCallStack => TestParams -> IO ()
 testRefundRecorded ps = withStoreService ps $ \_ _ cc -> do
   let st = chatStore cc
       paidBy = paidByBtc "s"
+      recorded cents destination = Right ("Recorded a refund of " <> cents <> " for order s. Refund it now to " <> destination <> ", by: " <> paidBy <> ".")
   Balances.source st "s" 10000
   balanceRaw cc "inv-s" `shouldReturn` Right ("Order s: balance $100.00 (credited $100.00, refunded $0.00). Paid by: " <> paidBy <> ". To record its refund: //record_refund inv-s 10000")
-  logs <- capturingStderr $ recordRefundRaw cc "inv-s 10000" `shouldReturn` Right ("Recorded a refund of $100.00 for order s. Refund it now, by: " <> paidBy <> ".")
+  signedNow <- nowSeconds
+  whole <- signedBy keyA Refund {rfRef = "inv-s", rfCents = 10000, rfTo = buyerAddress, rfAt = signedNow}
+  logs <- capturingStderr $ recordRefundRaw cc whole `shouldReturn` recorded "$100.00" buyerAddress
   T.lines logs `shouldSatisfy` any (T.isSuffixOf "names: recorded a refund of 10000 cents for order s")
   Balances.figures st "s" `shouldReturn` Just (0, 10000, 10000)
   balanceRaw cc "inv-s" `shouldReturn` Right ("Order s: balance $0.00 (credited $100.00, refunded $100.00). Paid by: " <> paidBy <> ". Nothing to refund.")
   Balances.credit st "s" 2505
-  recordRefundRaw cc "s 2505" `shouldReturn` Right ("Recorded a refund of $25.05 for order s. Refund it now, by: " <> paidBy <> ".")
+  older <- signedBy keyA Refund {rfRef = "s", rfCents = 2505, rfTo = otherAddress, rfAt = signedNow - 29 * daySeconds}
+  recordRefundRaw cc older `shouldReturn` recorded "$25.05" otherAddress
   Balances.figures st "s" `shouldReturn` Just (0, 12505, 12505)
+  cardSource cc "c"
+  card <- signedBy keyA Refund {rfRef = "inv-c", rfCents = 10000, rfTo = "card", rfAt = signedNow}
+  recordRefundRaw cc card `shouldReturn` Right ("Recorded a refund of $100.00 for order c. Refund it now to the card, by: " <> paidByCard "c" <> ".")
+  Balances.figures st "c" `shouldReturn` Just (0, 10000, 10000)
 
 testRefundRefusals :: HasCallStack => TestParams -> IO ()
 testRefundRefusals ps = withStoreService ps $ \_ _ cc -> do
   let st = chatStore cc
+      refusedAs reason args = recordRefundRaw cc args `shouldReturn` Left ("Nothing recorded: " <> reason <> ".")
   Balances.placeOrderRow st "plain" False 20000 t0
   Balances.source st "s" 10000
+  cardSource cc "c"
+  code <- issue st 1 usable
+  placeCode st "code" ownerA (order "codebakery" 4) code `shouldReturn` Right ()
+  signedNow <- nowSeconds
+  let s = Refund {rfRef = "s", rfCents = 10000, rfTo = buyerAddress, rfAt = signedNow}
   balanceRaw cc "nothing" `shouldReturn` Left "No order has the reference nothing."
-  recordRefundRaw cc "nothing 10000" `shouldReturn` Left "Nothing recorded: no order has the reference nothing."
+  signedBy keyA s {rfRef = "nothing"} >>= refusedAs "no order has the reference nothing"
   balanceRaw cc "inv-plain" `shouldReturn` Left "Order plain has no balance."
-  recordRefundRaw cc "inv-plain 20000" `shouldReturn` Left "Nothing recorded: the order of inv-plain has no balance."
-  recordRefundRaw cc "s 9000" `shouldReturn` Left "Nothing recorded: the balance is $100.00 now, not $90.00."
-  recordRefundRaw cc "s 10001" `shouldReturn` Left "Nothing recorded: the balance is $100.00 now, not $100.01."
-  forM_ ["", "s", "s 0", "s -5", "s 100.00", "s 10000 junk", "s 99999999999999999999"] $ \args ->
-    (args,) <$> recordRefundRaw cc args `shouldReturn` (args, Left "Usage: //record_refund <reference> <cents>")
+  signedBy keyA s {rfRef = "inv-plain", rfCents = 20000} >>= refusedAs "the order of inv-plain has no balance"
+  signedBy keyA s {rfCents = 9000} >>= refusedAs "the balance is $100.00 now, not $90.00"
+  signedBy keyA s {rfCents = 10001} >>= refusedAs "the balance is $100.00 now, not $100.01"
+  signedBy keyB s >>= refusedAs "no order has the reference s"
+  sig <- refundSignature keyA s
+  forM_ [s {rfRef = "inv-s"}, s {rfCents = 9000}, s {rfTo = otherAddress}, s {rfAt = signedNow + 1}] $ \changed@Refund {rfRef} ->
+    refusedAs ("no order has the reference " <> rfRef) (refundArgs changed sig)
+  signedBy keyA s {rfTo = "card"} >>= refusedAs "the order was paid by btc, which is refunded to an address the buyer gives, not to a card"
+  signedBy keyA s {rfRef = "c"} >>= refusedAs "the order was paid by card, which is refunded to its card, not to an address"
+  signedBy keyA s {rfRef = "code", rfTo = "card"} >>= refusedAs "the order was paid with a prepaid code, so nothing is refunded"
+  forM_ [signedNow - 30 * daySeconds - 120, signedNow + 720] $ \outside -> signedBy keyA s {rfAt = outside} >>= refusedAs outsideWindow
+  let fields = "s 10000 " <> buyerAddress
+  forM_
+    [ "",
+      "s",
+      "s 10000",
+      fields,
+      fields <> " " <> tshow signedNow,
+      "s 0 " <> buyerAddress <> " " <> tshow signedNow <> " " <> sig,
+      "s -5 " <> buyerAddress <> " " <> tshow signedNow <> " " <> sig,
+      "s 100.00 " <> buyerAddress <> " " <> tshow signedNow <> " " <> sig,
+      "s 99999999999999999999 " <> buyerAddress <> " " <> tshow signedNow <> " " <> sig,
+      fields <> " 1.5 " <> sig,
+      fields <> " 18446744073709551616 " <> sig,
+      fields <> " " <> tshow signedNow <> " 0x1b",
+      fields <> " " <> tshow signedNow <> " " <> T.toUpper sig,
+      refundArgs s sig <> " junk"
+    ]
+    $ \args -> (args,) <$> recordRefundRaw cc args `shouldReturn` (args, Left recordRefundUsage)
   forM_ ["", "s 10000"] $ \args -> (args,) <$> balanceRaw cc args `shouldReturn` (args, Left "Usage: //balance <reference>")
   operatorCmd cc "//refund s 10000" `shouldReturn` Left badgeCmdUsage
-  Balances.figures st "s" `shouldReturn` Just (10000, 10000, 0)
+  mapM (Balances.figures st) ["s", "c"] `shouldReturn` replicate 2 (Just (10000, 10000, 0))
 
 paidByBtc :: Text -> Text
 paidByBtc r = "order " <> r <> " of " <> addressText ownerA <> ": $100.00 by btc on invoice inv-" <> r <> " (provider reference ref-inv-" <> r <> ")"
+
+paidByCard :: Text -> Text
+paidByCard r = "order " <> r <> " of " <> addressText ownerA <> ": $100.00 by card on invoice inv-" <> r <> " (provider reference ref-inv-" <> r <> ")"
 
 data TurnHolder a = TurnHolder {thAction :: Async a, thRelease :: MVar ()}
 
@@ -1816,8 +1925,8 @@ expectedCommands =
     CBCCommand "bulk" "Generate many codes" (Just "<supporter|legend|investor> [months <N>] count <N>"),
     CBCCommand "revoke" "Revoke a code" (Just "<code>"),
     CBCCommand "balance" "Show an order's balance" (Just "<reference>"),
-    CBCCommand "record_refund" "Record a balance refund" (Just "<reference> <cents>"),
-    CBCCommand "close" "Close a failed order" (Just "<reference>")
+    CBCCommand "record_refund" "Record a balance refund" (Just "<reference> <cents> <destination> <timestamp> <signature>"),
+    CBCCommand "close" "Close a failed order" (Just "<reference> <cents> <destination> <timestamp> <signature>")
   ]
 
 advertisedCommands :: HasCallStack => ChatController -> Int64 -> IO (Maybe [ChatBotCommand])

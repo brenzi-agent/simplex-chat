@@ -121,16 +121,20 @@ badgeGroupTests = describe "badge group" $ do
     it "runs /balance, /record_refund and /close only for an owner, saying nothing to others" $ do
       let roles = [GRMember, GRModerator, GRAdmin, GROwner]
           ownerOnly cmd = replicate 3 IgnoreMsg <> [RunCmd (GCMoney cmd)]
+          runsMoney action = case action of
+            RunCmd (GCMoney _) -> True
+            _ -> False
+          request = " inv-s 10000 card 1792828800 0x" <> T.replicate 128 "1" <> "1b"
       map (`groupCmdAction` "/balance s") roles `shouldBe` ownerOnly (MCBalance "s")
-      map (`groupCmdAction` "/record_refund inv-s 10000") roles `shouldBe` ownerOnly (MCRecordRefund "inv-s" 10000)
-      map (`groupCmdAction` "/close inv-f") roles `shouldBe` ownerOnly (MCClose "inv-f")
+      map (\cmd -> map (runsMoney . (`groupCmdAction` cmd)) roles) ["/record_refund" <> request, "/close" <> request]
+        `shouldBe` replicate 2 [False, False, False, True]
       groupCmdAction GRAdmin "/record_refund s" `shouldBe` IgnoreMsg
       p "/refund s 10000" `shouldBe` IgnoreMsg
-    it "answers a malformed /balance, /record_refund or /close with its usage" $
-      map p ["/balance", "/balance s junk", "/record_refund s", "/record_refund s 0", "/record_refund s -5", "/record_refund s 100.00", "/record_refund s 99999999999999999999", "/close", "/close s junk"]
+    it "answers a malformed /balance, an unsigned /record_refund or /close and a malformed refund request with its usage" $
+      map p ["/balance", "/balance s junk", "/record_refund s", "/record_refund s 10000", "/record_refund s 0", "/record_refund s -5", "/record_refund s 100.00", "/record_refund s 99999999999999999999", "/close", "/close s", "/close s junk"]
         `shouldBe` replicate 2 (ReplyText "Usage: /balance <reference>")
-          <> replicate 5 (ReplyText "Usage: /record_refund <reference> <cents>")
-          <> replicate 2 (ReplyText "Usage: /close <reference>")
+          <> replicate 6 (ReplyText "Usage: /record_refund <reference> <cents> <destination> <timestamp> <signature>")
+          <> replicate 3 (ReplyText "Usage: /close <reference> <cents> <destination> <timestamp> <signature>")
     it "accepts a command padded with whitespace" $ do
       p " /issue supporter " `shouldBe` RunCmd (GCIssue BTSupporter 1 1 CPSFree)
       p "\t/bulk supporter count 1" `shouldBe` RunCmd (GCBulk BTSupporter 1 1)
