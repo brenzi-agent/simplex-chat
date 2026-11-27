@@ -1320,8 +1320,8 @@ the order again with the new values; a commitment past its age is committed agai
 `/retry`, and an order its page has not read for 3 days fails as `unread` until its buyer's Continue.
 A change of `[chain] resolver` or `[names] tld` changes every open order's commitment, so those orders
 cannot be signed again: the drain runs without the 15 minutes' cap, an order with a stored reveal
-fails as `signatureRefused` and is reported, and support closes a paid order with `//close` once it
-failed or its commitment lapsed.
+fails as `signatureRefused` and is reported, and support closes a paid order with `//close`, on its
+buyer's signed refund request, once it failed or its commitment lapsed.
 
 ```mermaid
 sequenceDiagram
@@ -1694,7 +1694,7 @@ A commit, relay or register mined with status 0 counts toward `[names] max_sent_
 commitment, and a commit's dry run that reverts for one of the reasons above toward
 `max_dry_run_failures`. At either cap the order fails with the reason `registryRefused`, logged at error and
 posted in the managed group as `names worker: registration <id> failed: its register failed <n> times
-at its dry run, last: <reason>`, and support closes it with `//close` (see
+at its dry run, last: <reason>`, and support closes it with `//close`, on its buyer's signed refund request (see
 [Closing a failed order](#closing-a-failed-order)). Both counts start again at a selection of a name after a reset. Any other
 failure after which the order's phase is kept, such as a node that does not answer, funds, the fee
 cap, the allowance or an exception in its step, is posted in the group after 10 minutes of
@@ -1721,8 +1721,8 @@ A change of `[chain] resolver` or `[names] tld` changes the commitment of every 
 page cannot sign it again. Such an order with a stored reveal fails with the reason
 `signatureRefused`, logged at error and posted in the managed group as
 `names worker: registration <id> failed: its commitment is not the one the service's current configuration makes, so its stored signature is refused, …`,
-and support closes a paid one with `//close`; one without a stored reveal waits, and support closes
-a paid one with `//close` once its commitment lapses.
+and support closes a paid one with `//close`, on its buyer's signed refund request; one without a
+stored reveal waits, and support closes a paid one so once its commitment lapses.
 
 A close of a failed order, and the worker's judgment of a register that did not go
 through, first run `confirmLanded`. It marks the order registered when `ownerOf` at the confirmation
@@ -2024,6 +2024,8 @@ simplex.domains order <reference> refund <cents> <destination> <timestamp>
   id only for an order without an invoice; `cents` is the balance; `destination` is `card` for an order paid by card, which Stripe refunds to
   the card that paid, and the address the buyer gives for an order paid in Bitcoin or Monero, as
   typed; `timestamp` is in seconds.
+- The numbers are written in decimal without leading zeros, and the destination as one word other
+  than `card` for an address.
 - It is signed as the order requests are, with EIP-191 `personal_sign`; the signature is `0x` and
   130 lowercase hex digits, with s in the lower half of the group order and v 27 or 28.
 - The names page signs it and gives the buyer one line to send to chat@simplex.chat:
@@ -2040,8 +2042,8 @@ group](#balances-and-failed-orders-in-the-group)):
 //record_refund <reference> <cents> <destination> <timestamp> <signature>
 ```
 
-1. Run `//balance <reference>` with the reference of the buyer's request. It records nothing and answers the
-   balance, what paid for it and the reference and cents of the command that records its refund:
+1. Run `//balance <reference>` with the reference of the buyer's request. Nothing is recorded, and the
+   service answers the balance, what paid for it and the reference and cents of `//record_refund` for it:
 
    ```
    Order <id>: balance $100.00 (credited $100.00, refunded $0.00). Paid by: order <id> of <owner>: $100.00 by btc on invoice <invoice id> (provider reference <provider reference>). To record its refund: //record_refund <reference> 10000
@@ -2092,7 +2094,7 @@ it runs; a month-ended order is refused, and its refund is recorded with `//reco
 ```
 
 Support gives it the buyer's refund request, as to `//record_refund`, and the service refuses the
-request alike; its cents are those of the refund recorded by the close: the order's price, with any
+request alike; its cents are those of the refund recorded at the close: the order's price, with any
 overpayment or late money its balance already holds. The command reads the chain, so it
 needs `[names]` and `[chain]` in `store_service.ini`; without `[names]` it answers that names are not
 enabled. It:
@@ -2201,11 +2203,10 @@ the Stripe key, so the dev server shows its stand-in card form. Its controls:
 | `/control/search` with the reset that `search.spec.ts` sends after each case | answered as done |
 
 After each change at a provider, the runner sends the service that provider's webhook and answers
-once the service has read the change, its late money credited. `/control/refund/<invoice or
-registration>` `{"cents"}` records the refund of those cents or of the whole balance in the store, as
-support's `//record_refund` records it from the buyer's signed request; no request is signed in these
-cases, and
-`/control/take` holds these controls until the name is the holder's. Any other
+once the service has read the change, its late money credited. On `/control/refund/<invoice or
+registration>` `{"cents"}` the runner records the refund of those cents or of the whole balance in the
+store, which the service records only on the buyer's signed request with support's `//record_refund`;
+no request is signed in these cases. `/control/take` holds these controls until the name is the holder's. Any other
 `/control/` answers `501`, which fails the case that sends it; `EXCLUDED` in the script names each case
 that cannot run against the service, with the reason.
 
