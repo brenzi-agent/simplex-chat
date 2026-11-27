@@ -520,7 +520,7 @@ sequenceDiagram
   C-->>O: balance, credited, refunded, paid by, the cents of a refund request for it
   O->>C: //record_refund REFERENCE CENTS DESTINATION TIMESTAMP SIGNATURE
   C->>D: the order of the reference, its owner the request's signer
-  C->>D: under the balance's lock, a request signed after its last refund: amount 0, refunded raised by the cents, refunded_at now
+  C->>D: under the balance's lock, a request signed after its last refund: amount 0, refunded raised by the cents, refunded_at the later of now and the request's timestamp
   C-->>O: Recorded a refund ... Refund it now to DESTINATION, by: PAYMENT.
   O--)B: money paid back by hand to the destination (outside the service)
 ```
@@ -528,7 +528,7 @@ sequenceDiagram
 Notes:
 
 - A refund is recorded only on the request `simplex.domains order <reference> refund <cents> <destination> <timestamp>`, signed with EIP-191 by the order's owner, its destination `card` for a card payment and an address for a crypto payment, signed at most 30 days before the service's clock and at most 600 seconds after it. Within that window, a request of another signer, or with a field changed after it was signed, is answered as one for an unknown reference. Nothing is recorded on any refusal ([`Names/Balances.hs`](../src/StoreService/Names/Balances.hs) `requestedOrder`, [`Names/Signatures.hs`](../src/StoreService/Names/Signatures.hs) `refundMessage`, [`Names/Orders.hs`](../src/StoreService/Names/Orders.hs) `signedWithin`).
-- The request's timestamp must be after the balance's `refunded_at`, the time of its last recorded refund, which is read in the refund's transaction; the buyer signs a new request for each refund ([`Names/Balances.hs`](../src/StoreService/Names/Balances.hs) `signedAfterRefund`, `recordRefund`).
+- The request's timestamp must be after the balance's `refunded_at`, which is read in the refund's transaction. At a refund, `refunded_at` is set to the later of the service's clock and the request's timestamp, so a request dated ahead of the clock is refused after its refund too. The buyer signs a new request for each refund ([`Names/Balances.hs`](../src/StoreService/Names/Balances.hs) `signedAfterRefund`, `refundTime`, `recordRefund`).
 - The refund must equal the whole balance ([`Names/Balances.hs`](../src/StoreService/Names/Balances.hs) `recordRefund`, [`Names/Store.hs`](../src/StoreService/Names/Store.hs) `refundBalance`).
 - A balance is credited when a paid order is set `taken` or fails at the end of its month (its whole price), when support closes a failed order, and with late or extra money; it is spent only on a name selected for its own order after a reset (3.6), and on no other order ([`Names/Worker.hs`](../src/StoreService/Names/Worker.hs) `endOrder`, `refundTaken`, [`Names/LateCredits.hs`](../src/StoreService/Names/LateCredits.hs), [`Names/Orders.hs`](../src/StoreService/Names/Orders.hs) `selectName`).
 - The provider interface offers create, the refusal of an invoice it cannot make, read, cancel, list, rate and webhook verification, so the money is paid back by hand ([`Providers.hs:120-130`](../src/StoreService/Providers.hs#L120-L130)). The buyer's email to chat@simplex.chat is described in the README; the page code is in the submodule ([README, "Refunding a name balance"](../README.md#refunding-a-name-balance)).

@@ -681,8 +681,8 @@ from some contacts. Before the service starts on it:
    service numbers a new transaction after the key's mined transactions and the ones the copy saved,
    so a transaction in the pool that the copy does not hold can have the same nonce.
 2. Record again, with `//record_refund` in `--run-cli` or `/record_refund` in the group, each refund recorded after the copy, with the
-   buyer's request it was recorded with, or a new one in place of a request older than 30 days and for
-   each refund of one order after the first, and pay nothing: the copy holds
+   buyer's request it was recorded with, and pay nothing; the buyer signs a new request in place of one
+   older than 30 days, and of each request of an order after its first refund recorded again. The copy holds
    those balances unrefunded, so they could be refunded twice. The service logged each as
    `names: recorded a refund of <cents> cents for order <registration id>`.
 3. Revoke with `//revoke` each code spent or revoked after the copy, which the copy holds unspent, and
@@ -2066,8 +2066,8 @@ group](#balances-and-failed-orders-in-the-group)):
      With other cents nothing is recorded, and the service answers the balance;
    - the request was signed at most 30 days before the service's clock and at most 600 seconds
      after it; the buyer signs a new one in place of an older one;
-   - the request's timestamp is after the order's last recorded refund; the buyer signs a new
-     request for each refund.
+   - the request's timestamp is after the time of the order's last refund, the later of the time
+     it was recorded and its request's timestamp; the buyer signs a new request for each refund.
 3. The service answers `Recorded a refund of $100.00 for order <id>. Refund it now to <destination>, by: …`,
    with the request's destination, `the card` or the buyer's address, and what paid. Pay
    the balance's amount in US dollars back now, to that destination. The refund is
@@ -2108,7 +2108,8 @@ enabled. It:
 2. otherwise, in one transaction, sets the order `taken`, clears its stored signatures, credits its
    price to its balance, which may already hold an overpayment or late money, and records all
    of that balance as refunded, as `//record_refund` does; when that balance is not the request's
-   cents, nothing is recorded, and the service answers the balance.
+   cents, nothing is recorded, and the service answers the balance; when the request's timestamp is
+   not after the time of the balance's last refund, nothing is recorded either, after the chain check.
 
 The service answers `Closed order <id>, failed or lapsed unsigned at <time>, as taken and recorded a refund of $100.00. Check at
 the provider that it was not refunded by hand before; if not, refund it now to <destination>, by: …`, with the
