@@ -9,6 +9,7 @@ module StoreService.Names.Balances
     RefundRefusal (..),
     RefundRecord (..),
     requestedOrder,
+    signedAfterRefund,
     recordRefund,
     reverseOrder,
     warnOfFraud,
@@ -24,12 +25,14 @@ import Data.Int (Int64)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (UTCTime)
+import Data.Word (Word64)
 import Simplex.Chat.PaymentService.Types (CryptoCurrency, CurrencyAmount (..), ServicePaymentMethod (SPMCard, SPMCrypto))
 import Simplex.Messaging.Agent.Store.Common (DBStore, withTransaction)
 import qualified Simplex.Messaging.Agent.Store.DB as DB
 import Simplex.Messaging.Encoding.String (StrEncoding (..), textEncode)
 import Simplex.Messaging.Eth.Address (recoverAddress)
 import Simplex.Messaging.Names.Record (USDCents)
+import Simplex.Messaging.SystemTime (RoundedSystemTime (..), roundedToUTCTime)
 import Simplex.Messaging.Util (eitherToMaybe, safeDecodeUtf8, tshow, ($>>=))
 import StoreService.Names.Orders (OrdersEnv (..), refundRequestSeconds, signedRequestSeconds, signedWithin)
 import StoreService.Names.Phases (RegistrationId (..), publish)
@@ -42,7 +45,7 @@ import StoreService.Orders (RegistrationChanged (..))
 import StoreService.Providers (Reversal (..))
 import StoreService.Store.Invoices (InvoiceRow (..), lockInvoice)
 
-data RequestRefusal = RQOutsideWindow | RQNoOrder | RQCardOnly | RQAddressOnly CryptoCurrency | RQPrepaidCode
+data RequestRefusal = RQOutsideWindow | RQNoOrder | RQCardOnly | RQAddressOnly CryptoCurrency | RQPrepaidCode | RQNotAfterRefund
   deriving (Eq, Show)
 
 -- | RefundAmount: the balance's amount now, which is not the cents given.
@@ -75,9 +78,12 @@ checkDestination payment destination = case (payment, destination) of
   (OPInvoice (SPMCrypto coin) _, RDCard) -> Left $ RQAddressOnly coin
   (OPCode _, _) -> Left RQPrepaidCode
 
+signedAfterRefund :: Word64 -> Balance -> Bool
+signedAfterRefund timestamp Balance {blRefundedAt} = all (< roundedToUTCTime (RoundedSystemTime $ fromIntegral timestamp)) blRefundedAt
+
 -- | The reference is the order's registration id or its name invoice's id. In the balance's turn and one transaction.
 recordRefund :: Turns -> DBStore -> RefundRequest -> UTCTime -> IO (Either RefundRefusal RefundRecord)
-recordRefund turns st req@RefundRequest {rqCents = cents} now =
+recordRefund turns st req@RefundRequest {rqCents = cents, rqTimestamp} now =
   requestedOrder st now req >>= \case
     Left refused -> pure $ Left $ RefundRequestRefused refused
     Right NameRegistration {nrId} -> withBalanceTurn turns nrId $ withTransaction st $ refund nrId
@@ -92,7 +98,8 @@ recordRefund turns st req@RefundRequest {rqCents = cents} now =
     refusal :: Maybe Balance -> Maybe RefundRefusal
     refusal = \case
       Nothing -> Just RefundNoBalance
-      Just Balance {blAmount}
+      Just balance@Balance {blAmount}
+        | not (signedAfterRefund rqTimestamp balance) -> Just $ RefundRequestRefused RQNotAfterRefund
         | blAmount /= cents || blAmount <= 0 -> Just $ RefundAmount blAmount
         | otherwise -> Nothing
 

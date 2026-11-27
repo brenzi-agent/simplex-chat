@@ -1739,6 +1739,7 @@ testCloseFailed = withWorker $ \W {wCtx = ctx@Ctx {cStore, cOrders}} -> do
   (nrPhase x, nrReveal x, nrVersion x) `shouldBe` (OTaken orderTime, Nothing, nrVersion r + 1)
   figuresOf ctx r `shouldReturn` Just (0, price, price)
   timeout prompt (withLabelTurn (oeTurns cOrders) (nrLabelHash r) $ withBalanceTurn (oeTurns cOrders) (nrId r) $ pure ()) `shouldReturn` Just ()
+  recordOwnerRefund (oeTurns cOrders) cStore rid price orderTime `shouldReturn` Left (RefundRequestRefused RQNotAfterRefund)
   recordOwnerRefund (oeTurns cOrders) cStore rid price (addUTCTime 1 orderTime) `shouldReturn` Left (RefundAmount 0)
   retryOf ctx x `shouldReturn` refusedWith 400 "bad_request"
   answerFree ctx "alicebakers"

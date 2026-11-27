@@ -73,7 +73,7 @@ namesBalancesTests = describe "StoreService names: balances" $ do
     it "links an order its invoice paid with the extra credited to it" testLinkOfOverpaid
     it "returns the 50 newest orders and then every older one holding a balance above 0" testFindBalances
   describe "refunds" $ do
-    it "refuses no order, no balance and another amount, then records one with the order's payment" testRecordRefund
+    it "refuses no order, no balance and another amount, then records one with the order's payment, and refuses a request signed no later than it" testRecordRefund
     it "takes a refund request signed at most 30 days before the clock and at most 600 seconds after it" testRefundWindow
     it "words the order with its payment and late or overpaid cents" testLinkText
   describe "late credits" $ do
@@ -333,6 +333,7 @@ testRecordRefund = withServiceStore $ \st -> do
   link `shouldBe` Just BalanceLink {lkRegistration = RegistrationId "s", lkOwner = ownerA, lkPayment = OPInvoice btc (InvoiceId "inv-s"), lkProviderRef = Just "ref-inv-s", lkPaid = 10000, lkLateCredits = []}
   refundOf "inv-s" 10000 t0 `shouldReturn` Right RefundRecord {rdRegistration = RegistrationId "s", rdCents = 10000, rdLink = link}
   figures st "s" `shouldReturn` Just (0, 10000, 10000)
+  refundOf "s" 10000 t0 `shouldReturn` Left (RefundRequestRefused RQNotAfterRefund)
   refundOf "s" 10000 (at 1) `shouldReturn` Left (RefundAmount 0)
   timeout 5000000 (withBalanceTurn turns (RegistrationId "s") $ pure ()) `shouldReturn` Just ()
 

@@ -37,7 +37,7 @@ import Control.Concurrent.STM
 import Control.Exception (finally, mask_)
 import qualified Control.Exception as E
 import Control.Logger.Simple (logError, logNote, logWarn)
-import Control.Monad (forM_, forever, void, when)
+import Control.Monad (forM_, forever, unless, void, when)
 import Control.Monad.Except (ExceptT (..), runExceptT)
 import Data.Bifunctor (first)
 import Data.Either (lefts)
@@ -58,7 +58,7 @@ import Simplex.Messaging.TMap (TMap)
 import qualified Simplex.Messaging.TMap as TM
 import Simplex.Messaging.Util (catchOwn', tshow)
 import StoreService.Config (ChainConfig (..), NamesConfig (..))
-import StoreService.Names.Balances (RefundRecord (..), RequestRefusal, requestedOrder)
+import StoreService.Names.Balances (RefundRecord (..), RequestRefusal (..), requestedOrder, signedAfterRefund)
 import StoreService.Names.Chain (Block (..), BlockTag (..), ChainError (..), TxHash, blockAt)
 import StoreService.Names.Codes (releaseCode)
 import StoreService.Names.Contracts (CommitmentAges (..), Contracts (..), acceptedTerms, commitmentAges, commitmentTime, communityName, confirmedTag, controllerAvailable, disputeUntil, forgetNamePolicy, namePolicy)
@@ -619,7 +619,7 @@ newtype CloseRefused = CloseRefused CloseRefusal
 instance E.Exception CloseRefused
 
 closeRegistration :: DBStore -> Contracts -> Turns -> IO UTCTime -> RefundRequest -> IO Closed
-closeRegistration st ct turns clock req@RefundRequest {rqCents} = do
+closeRegistration st ct turns clock req = do
   now <- clock
   requestedOrder st now req >>= \case
     Left refusal -> refused $ CFRequestRefused refusal
@@ -641,10 +641,10 @@ closeRegistration st ct turns clock req@RefundRequest {rqCents} = do
         LEnded _ -> pure $ CLEnded nrId
         LChanged -> refused CFChanged
         LUnread -> refused CFUnread
-        LNotLanded -> either CLRefused (CLRefunded endedAt) <$> refundTaken st turns now rqCents r {nrReveal = Nothing}
+        LNotLanded -> either CLRefused (CLRefunded endedAt) <$> refundTaken st turns now req r {nrReveal = Nothing}
 
-refundTaken :: DBStore -> Turns -> UTCTime -> USDCents -> NameRegistration -> IO (Either CloseRefusal RefundRecord)
-refundTaken st turns now asked r@NameRegistration {nrId} =
+refundTaken :: DBStore -> Turns -> UTCTime -> RefundRequest -> NameRegistration -> IO (Either CloseRefusal RefundRecord)
+refundTaken st turns now RefundRequest {rqCents, rqTimestamp} r@NameRegistration {nrId} =
   withBalanceTurn turns nrId $ either (\(CloseRefused refusal) -> Left refusal) id <$> E.try (withTransaction st refund)
   where
     refund db =
@@ -656,8 +656,10 @@ refundTaken st turns now asked r@NameRegistration {nrId} =
             Left (WRRefused refusal) -> E.throwIO $ BrokenInvariant $ "the taken write of order " <> ridText <> " was refused as " <> tshow refusal <> ", while a write that closes an order is refused only as changed"
             Right _ -> Right <$> refundAll db
     refundAll db = do
-      cents <- maybe 0 blAmount <$> getBalance db nrId
-      when (cents /= asked) $ E.throwIO $ CloseRefused $ CFAmount cents
+      balance_ <- getBalance db nrId
+      unless (all (signedAfterRefund rqTimestamp) balance_) $ E.throwIO $ CloseRefused $ CFRequestRefused RQNotAfterRefund
+      let cents = maybe 0 blAmount balance_
+      when (cents /= rqCents) $ E.throwIO $ CloseRefused $ CFAmount cents
       refundBalance db nrId cents now >>= \case
         True -> RefundRecord nrId cents <$> balanceLink db nrId
         False -> E.throwIO $ CloseRefused CFBalanceChanged

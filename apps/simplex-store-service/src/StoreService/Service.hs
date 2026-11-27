@@ -445,7 +445,7 @@ showRefund source cc ref =
   where
     withLink db (rid, balance_) = (rid,) <$> mapM (\balance -> (balance,) <$> balanceLink db rid) balance_
     nextStep Balance {blAmount}
-      | blAmount > 0 = "To record its refund: " <> spelledCmd source "record_refund" <> " " <> ref <> " " <> tshow (toInteger blAmount)
+      | blAmount > 0 = "To record its refund: " <> spelledCmd source "record_refund" <> " with the buyer's signed refund request for " <> tshow (toInteger blAmount) <> " cents."
       | otherwise = "Nothing to refund."
 
 -- | The refund is recorded before support pays it, so the balance cannot be spent meanwhile.
@@ -474,6 +474,7 @@ requestRefusalText ref = \case
   RQCardOnly -> "the order was paid by card, which is refunded to its card, not to an address"
   RQAddressOnly coin -> "the order was paid by " <> textEncode coin <> ", which is refunded to an address the buyer gives, not to a card"
   RQPrepaidCode -> "the order was paid with a prepaid code, so nothing is refunded"
+  RQNotAfterRefund -> "the request was signed no later than the order's last recorded refund; ask the buyer to sign a new one"
 
 destinationText :: RefundDestination -> T.Text
 destinationText = \case
