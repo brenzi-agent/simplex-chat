@@ -333,7 +333,7 @@ testRecordRefund = withServiceStore $ \st -> do
   link `shouldBe` Just BalanceLink {lkRegistration = RegistrationId "s", lkOwner = ownerA, lkPayment = OPInvoice btc (InvoiceId "inv-s"), lkProviderRef = Just "ref-inv-s", lkPaid = 10000, lkLateCredits = []}
   refundOf "inv-s" 10000 t0 `shouldReturn` Right RefundRecord {rdRegistration = RegistrationId "s", rdCents = 10000, rdLink = link}
   figures st "s" `shouldReturn` Just (0, 10000, 10000)
-  refundOf "s" 10000 t0 `shouldReturn` Left (RefundAmount 0)
+  refundOf "s" 10000 (at 1) `shouldReturn` Left (RefundAmount 0)
   timeout 5000000 (withBalanceTurn turns (RegistrationId "s") $ pure ()) `shouldReturn` Just ()
 
 testRefundWindow :: IO ()

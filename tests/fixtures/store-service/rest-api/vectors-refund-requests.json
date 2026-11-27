@@ -1,0 +1,19 @@
+{
+  "aheadSeconds": 600,
+  "cents": 10000,
+  "messages": [
+    {
+      "destination": "card",
+      "digest": "0x351a53c3e90d5391bde463c0a6cf6533e40486c9c27e9a54fe1a78935a884d21",
+      "text": "simplex.domains order t2Jk8RmQ4vXw9NcP3yLb6g refund 10000 card 1792828800"
+    },
+    {
+      "destination": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+      "digest": "0xde856b50337610ec5b34666960a267ba8f476535ecefa05f794f93062814055e",
+      "text": "simplex.domains order t2Jk8RmQ4vXw9NcP3yLb6g refund 10000 bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4 1792828800"
+    }
+  ],
+  "reference": "t2Jk8RmQ4vXw9NcP3yLb6g",
+  "timestamp": 1792828800,
+  "windowSeconds": 2592000
+}

@@ -5,6 +5,7 @@
 
 module Bots.StoreService.NamesSignedTests (namesSignedTests) where
 
+import Bots.StoreService.NamesBalancesTests (refundAddress)
 import Bots.StoreService.NamesOrdersTests (Ctx (..), advance, aliceOrder, invoiceRegistration, keyA, keyB, placed, post, postRaw, seconds, signWith, withOrders)
 import Bots.StoreService.NamesOwnerTests (answerFree, committedPhase, paidIn, selectionBodyAt, selectionOf, stored, takenIn)
 import Bots.StoreService.NamesPhasesTests (registrationPath)
@@ -28,15 +29,16 @@ import Simplex.Chat.PaymentService.Types (InvoiceId (..))
 import Simplex.Messaging.Crypto.Secp256k1 (Secp256k1PrivateKey)
 import Simplex.Messaging.Encoding.String (TextEncoding (..))
 import StoreService.Names.Abi (hex)
-import StoreService.Names.Orders (signedRequestSeconds)
+import StoreService.Names.Orders (refundRequestSeconds, signedRequestSeconds)
 import StoreService.Names.Phases (RegistrationId (..))
-import StoreService.Names.Signatures (OrderAction (..), orderRequestMessage, personalDigest)
+import StoreService.Names.Signatures (OrderAction (..), RefundDestination (..), orderRequestMessage, personalDigest, refundMessage)
 import StoreService.Names.Store (NameRegistration (..))
 import Test.Hspec
 
 namesSignedTests :: Spec
 namesSignedTests = describe "StoreService names: signed order requests" $ do
   it "signs the message simplex.domains order <id> <action> <timestamp>, recorded for the names page" testMessage
+  it "signs the refund message simplex.domains order <reference> refund <cents> <destination> <timestamp>, recorded for the names page" testRefundMessage
   it "answers a registration read unsigned, by another key, over another action or id, and for an unknown id alike, a timestamp outside the window 400 for a known and an unknown id alike, and the owner's read with the view" testRegistrationRead
   it "answers a retry unsigned, by another key, over another action or id, and for an unknown id alike, writing nothing, a timestamp outside the window 400 alike, and retries the owner's" testRetry
   it "answers a reveal whose request is unsigned, by another key, over another action or id, and for an unknown id alike, writing nothing, a timestamp outside the window 400 alike, and accepts the owner's" testReveal
@@ -150,6 +152,27 @@ testMessage = do
     actions = [OARead, OACancel, OARetry, OAReveal]
     timestamp = 1792828800 :: Word64
     message action = orderRequestMessage unknownRid action timestamp
+
+testRefundMessage :: IO ()
+testRefundMessage = do
+  map message destinations
+    `shouldBe` [ "simplex.domains order t2Jk8RmQ4vXw9NcP3yLb6g refund 10000 card 1792828800",
+                 "simplex.domains order t2Jk8RmQ4vXw9NcP3yLb6g refund 10000 bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4 1792828800"
+               ]
+  writeFixture "store-service/rest-api/vectors-refund-requests" $
+    J.object
+      [ "reference" .= unknownRid,
+        "cents" .= cents,
+        "timestamp" .= timestamp,
+        "windowSeconds" .= refundRequestSeconds,
+        "aheadSeconds" .= signedRequestSeconds,
+        "messages" .= [J.object ["destination" .= textEncode destination, "text" .= decodeLatin1 (message destination), "digest" .= hex (personalDigest $ message destination)] | destination <- destinations]
+      ]
+  where
+    destinations = [RDCard, RDAddress refundAddress]
+    cents = 10000
+    timestamp = 1792828800 :: Word64
+    message destination = refundMessage unknownRid cents destination timestamp
 
 testRegistrationRead :: IO ()
 testRegistrationRead = withSigned $ \ctx -> do
