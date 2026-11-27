@@ -681,7 +681,7 @@ from some contacts. Before the service starts on it:
    service numbers a new transaction after the key's mined transactions and the ones the copy saved,
    so a transaction in the pool that the copy does not hold can have the same nonce.
 2. Record again, with `//record_refund` in `--run-cli` or `/record_refund` in the group, each refund recorded after the copy, with the
-   buyer's request it was recorded with, or a new one for a request signed more than 30 days before, and pay nothing: the copy holds
+   buyer's request it was recorded with, or a new one in place of a request older than 30 days, and pay nothing: the copy holds
    those balances unrefunded, so they could be refunded twice. The service logged each as
    `names: recorded a refund of <cents> cents for order <registration id>`.
 3. Revoke with `//revoke` each code spent or revoked after the copy, which the copy holds unspent, and
@@ -2013,16 +2013,15 @@ name first, or support closed the failed order with `//close`, which also record
 after the invoice closed, and when its invoice was paid more crypto than it asked (the extra). The
 balance of an order reset by a take is spent only when a name of the order's price is selected for that order,
 at any time, and on no other order. Otherwise the buyer asks for a balance back, and nothing is
-refunded automatically. A reference is not proof of who paid: a registration id is in the service's
-logs. So a refund is recorded only with a refund request signed with the order's name key, the key
-of its owner's name code:
+refunded automatically. A reference is not proof of who paid, so a refund is recorded only with a
+refund request signed with the order's name key, the key of its owner's name code:
 
 ```
 simplex.domains order <reference> refund <cents> <destination> <timestamp>
 ```
 
-- `reference` is the order's invoice id, or its registration id for an order without an invoice;
-  `cents` is the balance; `destination` is `card` for an order paid by card, which Stripe refunds to
+- `reference` is the order's invoice id or its registration id; the names page signs the registration
+  id only for an order without an invoice; `cents` is the balance; `destination` is `card` for an order paid by card, which Stripe refunds to
   the card that paid, and the address the buyer gives for an order paid in Bitcoin or Monero, as
   typed; `timestamp` is in seconds.
 - It is signed as the order requests are, with EIP-191 `personal_sign`; the signature is `0x` and
@@ -2060,7 +2059,7 @@ group](#balances-and-failed-orders-in-the-group)):
      it was signed, is answered as one for an unknown reference;
    - the destination is `card` for an order paid by card, and an address for an order paid in crypto;
      an order paid with a prepaid code is refunded nothing;
-   - the cents equal the whole balance: a refund zeroes it, and part of a balance is never refunded.
+   - the cents equal the whole balance, which is set to 0, as part of a balance is never refunded.
      With other cents nothing is recorded, and the service answers the balance;
    - the request was signed at most 30 days before the service's clock and at most 600 seconds
      after it; the buyer signs a new one in place of an older one.
@@ -2093,7 +2092,7 @@ it runs; a month-ended order is refused, and its refund is recorded with `//reco
 ```
 
 Support gives it the buyer's refund request, as to `//record_refund`, and the service refuses the
-request alike; its cents are those of the refund the close records: the order's price, with any
+request alike; its cents are those of the refund recorded by the close: the order's price, with any
 overpayment or late money its balance already holds. The command reads the chain, so it
 needs `[names]` and `[chain]` in `store_service.ini`; without `[names]` it answers that names are not
 enabled. It:
@@ -2204,7 +2203,8 @@ the Stripe key, so the dev server shows its stand-in card form. Its controls:
 After each change at a provider, the runner sends the service that provider's webhook and answers
 once the service has read the change, its late money credited. `/control/refund/<invoice or
 registration>` `{"cents"}` records the refund of those cents or of the whole balance in the store, as
-support's `//record_refund` records it from the buyer's signed request, which these cases do not make, and
+support's `//record_refund` records it from the buyer's signed request; no request is signed in these
+cases, and
 `/control/take` holds these controls until the name is the holder's. Any other
 `/control/` answers `501`, which fails the case that sends it; `EXCLUDED` in the script names each case
 that cannot run against the service, with the reason.
