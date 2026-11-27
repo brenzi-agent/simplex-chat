@@ -58,7 +58,7 @@ import Simplex.Messaging.TMap (TMap)
 import qualified Simplex.Messaging.TMap as TM
 import Simplex.Messaging.Util (catchOwn', tshow)
 import StoreService.Config (ChainConfig (..), NamesConfig (..))
-import StoreService.Names.Balances (RefundRecord (..), RequestRefusal (..), requestedOrder, signedAfterRefund)
+import StoreService.Names.Balances (RefundRecord (..), RequestRefusal (..), refundTime, requestedOrder, signedAfterRefund)
 import StoreService.Names.Chain (Block (..), BlockTag (..), ChainError (..), TxHash, blockAt)
 import StoreService.Names.Codes (releaseCode)
 import StoreService.Names.Contracts (CommitmentAges (..), Contracts (..), acceptedTerms, commitmentAges, commitmentTime, communityName, confirmedTag, controllerAvailable, disputeUntil, forgetNamePolicy, namePolicy)
@@ -660,7 +660,7 @@ refundTaken st turns now RefundRequest {rqCents, rqTimestamp} r@NameRegistration
       unless (all (signedAfterRefund rqTimestamp) balance_) $ E.throwIO $ CloseRefused $ CFRequestRefused RQNotAfterRefund
       let cents = maybe 0 blAmount balance_
       when (cents /= rqCents) $ E.throwIO $ CloseRefused $ CFAmount cents
-      refundBalance db nrId cents now >>= \case
+      refundBalance db nrId cents (refundTime now rqTimestamp) >>= \case
         True -> RefundRecord nrId cents <$> balanceLink db nrId
         False -> E.throwIO $ CloseRefused CFBalanceChanged
     RegistrationId ridText = nrId

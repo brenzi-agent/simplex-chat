@@ -33,6 +33,7 @@ module StoreService.Names.Orders
     codeOrderInsert,
     checkTimestamp,
     signedWithin,
+    requestTime,
     checkDuration,
     orderYears,
     checkTerms,
@@ -271,7 +272,10 @@ checkTimestamp now timestamp =
 signedWithin :: Integer -> Integer -> UTCTime -> Word64 -> Bool
 signedWithin maxAge maxAhead now timestamp = age <= fromInteger maxAge && negate age <= fromInteger maxAhead
   where
-    age = diffUTCTime now $ roundedToUTCTime $ RoundedSystemTime $ fromIntegral timestamp
+    age = diffUTCTime now $ requestTime timestamp
+
+requestTime :: Word64 -> UTCTime
+requestTime = roundedToUTCTime . RoundedSystemTime . fromIntegral
 
 -- | The paid years plus the free days until the term starts, by the service's clock, within the slack.
 checkDuration :: NamesConfig -> UTCTime -> Int -> Word64 -> Either OrderRefusal ()

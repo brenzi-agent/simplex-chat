@@ -10,6 +10,7 @@ module StoreService.Names.Balances
     RefundRecord (..),
     requestedOrder,
     signedAfterRefund,
+    refundTime,
     recordRefund,
     reverseOrder,
     warnOfFraud,
@@ -32,9 +33,8 @@ import qualified Simplex.Messaging.Agent.Store.DB as DB
 import Simplex.Messaging.Encoding.String (StrEncoding (..), textEncode)
 import Simplex.Messaging.Eth.Address (recoverAddress)
 import Simplex.Messaging.Names.Record (USDCents)
-import Simplex.Messaging.SystemTime (RoundedSystemTime (..), roundedToUTCTime)
 import Simplex.Messaging.Util (eitherToMaybe, safeDecodeUtf8, tshow, ($>>=))
-import StoreService.Names.Orders (OrdersEnv (..), refundRequestSeconds, signedRequestSeconds, signedWithin)
+import StoreService.Names.Orders (OrdersEnv (..), refundRequestSeconds, requestTime, signedRequestSeconds, signedWithin)
 import StoreService.Names.Phases (RegistrationId (..), publish)
 import StoreService.Names.Registration (TermsAcceptance (..))
 import StoreService.Names.Signatures (RefundDestination (..), RefundRequest (..), personalDigest, refundMessage)
@@ -79,7 +79,10 @@ checkDestination payment destination = case (payment, destination) of
   (OPCode _, _) -> Left RQPrepaidCode
 
 signedAfterRefund :: Word64 -> Balance -> Bool
-signedAfterRefund timestamp Balance {blRefundedAt} = all (< roundedToUTCTime (RoundedSystemTime $ fromIntegral timestamp)) blRefundedAt
+signedAfterRefund timestamp Balance {blRefundedAt} = all (< requestTime timestamp) blRefundedAt
+
+refundTime :: UTCTime -> Word64 -> UTCTime
+refundTime now = max now . requestTime
 
 -- | The reference is the order's registration id or its name invoice's id. In the balance's turn and one transaction.
 recordRefund :: Turns -> DBStore -> RefundRequest -> UTCTime -> IO (Either RefundRefusal RefundRecord)
@@ -90,7 +93,7 @@ recordRefund turns st req@RefundRequest {rqCents = cents, rqTimestamp} now =
   where
     refund rid@(RegistrationId r) db =
       refundable db rid $
-        refundBalance db rid cents now >>= \case
+        refundBalance db rid cents (refundTime now rqTimestamp) >>= \case
           True -> Right . RefundRecord rid cents <$> balanceLink db rid
           -- only a writer outside the turn, as a late credit, changes the balance between the read and the write, so it is read again once
           False -> refundable db rid $ E.throwIO $ BrokenInvariant $ "the refund of order " <> r <> " was refused, though its balance reads refundable"
