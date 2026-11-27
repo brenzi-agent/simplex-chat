@@ -681,7 +681,7 @@ from some contacts. Before the service starts on it:
    service numbers a new transaction after the key's mined transactions and the ones the copy saved,
    so a transaction in the pool that the copy does not hold can have the same nonce.
 2. Record again, with `//record_refund` in `--run-cli` or `/record_refund` in the group, each refund recorded after the copy, with the
-   buyer's request it was recorded with: the copy holds
+   buyer's request it was recorded with, or a new one for a request signed more than 30 days before, and pay nothing: the copy holds
    those balances unrefunded, so they could be refunded twice. The service logged each as
    `names: recorded a refund of <cents> cents for order <registration id>`.
 3. Revoke with `//revoke` each code spent or revoked after the copy, which the copy holds unspent, and
@@ -2061,18 +2061,18 @@ group](#balances-and-failed-orders-in-the-group)):
    - the destination is `card` for an order paid by card, and an address for an order paid in crypto;
      an order paid with a prepaid code is refunded nothing;
    - the cents equal the whole balance: a refund zeroes it, and part of a balance is never refunded.
-     Other cents record nothing, and the answer gives the balance;
+     With other cents nothing is recorded, and the service answers the balance;
    - the request was signed at most 30 days before the service's clock and at most 600 seconds
      after it; the buyer signs a new one in place of an older one.
-3. The answer, `Recorded a refund of $100.00 for order <id>. Refund it now to <destination>, by: …`,
-   names the request's destination, `the card` or the buyer's address, and repeats what paid. Pay
+3. The service answers `Recorded a refund of $100.00 for order <id>. Refund it now to <destination>, by: …`,
+   with the request's destination, `the card` or the buyer's address, and what paid. Pay
    the balance's amount in US dollars back now, to that destination. The refund is
    recorded first so that the money is not spent on a selection of a name while it is paid back. The service logs
    each recorded refund at note with the order's registration id and the cents.
 
-The commands also answer when the reference matches no order, when the order has no balance, when
-the cents are not the balance, and when the request is refused as above; an unsigned command gets the
-usage reply. A refunded balance shows `amount` 0 and its `refunded` total in
+The service also answers when the reference matches no order, when the order has no balance, when
+the cents are not the balance, and when the request is refused as above, and answers an unsigned
+command with its usage. A refunded balance shows `amount` 0 and its `refunded` total in
 Your names; a later late payment credits it again, and a second refund adds to `refunded`.
 
 ## Closing a failed order
@@ -2092,9 +2092,9 @@ it runs; a month-ended order is refused, and its refund is recorded with `//reco
 //close <reference> <cents> <destination> <timestamp> <signature>
 ```
 
-The command takes the buyer's refund request, as `//record_refund` does, refused as that command
-refuses it, with the cents of the refund the close records: the order's price, with any overpayment
-or late money its balance already holds. The command reads the chain, so it
+Support gives it the buyer's refund request, as to `//record_refund`, and the service refuses the
+request alike; its cents are those of the refund the close records: the order's price, with any
+overpayment or late money its balance already holds. The command reads the chain, so it
 needs `[names]` and `[chain]` in `store_service.ini`; without `[names]` it answers that names are not
 enabled. It:
 
@@ -2104,11 +2104,11 @@ enabled. It:
 2. otherwise, in one transaction, sets the order `taken`, clears its stored signatures, credits its
    price to its balance, which may already hold an overpayment or late money, and records all
    of that balance as refunded, as `//record_refund` does; when that balance is not the request's
-   cents, it records nothing, and the answer gives the balance.
+   cents, nothing is recorded, and the service answers the balance.
 
-The answer, `Closed order <id>, failed or lapsed unsigned at <time>, as taken and recorded a refund of $100.00. Check at
-the provider that it was not refunded by hand before; if not, refund it now to <destination>, by: …`, names the
-request's destination and lists what paid for the order, as the answer of `//record_refund` does. Before this command existed, support refunded failed
+The service answers `Closed order <id>, failed or lapsed unsigned at <time>, as taken and recorded a refund of $100.00. Check at
+the provider that it was not refunded by hand before; if not, refund it now to <destination>, by: …`, with the
+request's destination and what paid for the order, as for `//record_refund`. Before this command existed, support refunded failed
 orders at the provider by hand, so look for a refund of that payment after the failure time first, and
 pay the amount back by those methods only if none is found. The service logs each closed order at
 note with its registration id and the cents.
@@ -2116,7 +2116,8 @@ note with its registration id and the cents.
 Before the first version with `//close` is deployed, list the failed paid orders, with the committed
 ones past their signing deadline, which can be closed too, and find at the provider,
 by the provider reference listed, each one already refunded by hand. After the deploy, close
-the orders refunded by hand with `//close` and pay nothing, so that their records match the money:
+the orders refunded by hand with `//close`, on each buyer's signed refund request, and pay nothing, so
+that their records match the money:
 
 ```
 psql "$BADGE_DB_CONN" -Atc "SELECT r.registration_id, r.phase, r.failed_at, r.reveal_before, ni.invoice_id, i.provider_ref FROM simplex_v1_chat_schema.sx_badge_service_name_registrations r LEFT JOIN simplex_v1_chat_schema.sx_badge_service_name_invoices ni ON ni.registration_id = r.registration_id LEFT JOIN simplex_v1_chat_schema.sx_badge_service_invoices i ON i.invoice_id = ni.invoice_id WHERE r.name_prepaid_code_id IS NULL AND (r.phase = 'failed' OR (r.phase = 'committed' AND r.label IS NULL AND r.reveal_before < EXTRACT(EPOCH FROM now()))) ORDER BY r.created_at"
