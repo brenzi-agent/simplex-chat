@@ -123,8 +123,11 @@ orderRequestMessage oid action timestamp = message ["order", oid, textEncode act
 data RefundDestination = RDCard | RDAddress CryptoAddress
   deriving (Eq, Show)
 
-newtype CryptoAddress = CryptoAddress {cryptoAddressText :: Text}
+newtype CryptoAddress = CryptoAddress Text
   deriving (Eq, Show)
+
+cryptoAddressText :: CryptoAddress -> Text
+cryptoAddressText (CryptoAddress t) = t
 
 cryptoAddress :: Text -> Maybe CryptoAddress
 cryptoAddress t

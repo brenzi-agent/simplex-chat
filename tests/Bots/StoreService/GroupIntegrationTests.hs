@@ -585,7 +585,7 @@ testCloseRecorded ps = withFakeEthNode $ \node@FakeEthNode {fnUrl} -> do
     refusedAs "no order has the reference inv-f" (refundArgs failed {rfTo = otherAddress} sig)
     signedBy keyA failed {rfCents = 9000} >>= refusedAs "the close records a refund of $100.00, not $90.00"
     signedBy keyA failed {rfTo = "card"} >>= refusedAs "the order was paid by btc, which is refunded to an address the buyer gives, not to a card"
-    signedBy keyA failed {rfAt = signedNow - 30 * daySeconds - 120} >>= refusedAs outsideWindow
+    forM_ [signedNow - 30 * daySeconds - 120, signedNow + 720] $ \outside -> signedBy keyA failed {rfAt = outside} >>= refusedAs outsideWindow
     closeRaw cc "inv-f" `shouldReturn` Left closeUsage
     nrPhase <$> reg st "f" `shouldReturn` OFailed t0 FRRegistryRefused
     Balances.figures st "f" `shouldReturn` Nothing

@@ -629,8 +629,8 @@ closeRegistration st ct turns clock req@RefundRequest {rqCents} = do
         _ -> CLRefused CFChanged
   where
     refused = pure . CLRefused
-    closeFailed now r@NameRegistration {nrPayment, nrPhase} = case (nrPayment, nrPhase, lapseMoment r) of
-      (OPCode _, _, _) -> refused CFNotFailedPaid
+    closeFailed now r@NameRegistration {nrId = RegistrationId rid, nrPayment, nrPhase} = case (nrPayment, nrPhase, lapseMoment r) of
+      (OPCode _, _, _) -> E.throwIO $ BrokenInvariant $ "the refund request of order " <> rid <> " passed its check, though a prepaid code paid the order"
       (_, OFailed _ FRMonthEnded, _) -> refused CFMonthEnded
       (_, OFailed failedAt _, _) -> close now r failedAt
       (_, _, Just lapse) | now > lapse -> close now r lapse
