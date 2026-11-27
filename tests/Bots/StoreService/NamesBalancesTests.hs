@@ -75,6 +75,7 @@ namesBalancesTests = describe "StoreService names: balances" $ do
   describe "refunds" $ do
     it "refuses no order, no balance and another amount, then records one with the order's payment, and refuses a request signed no later than it" testRecordRefund
     it "takes a refund request signed at most 30 days before the clock and at most 600 seconds after it" testRefundWindow
+    it "refuses a refund request signed no later than a recorded request dated ahead of the clock" testRefundSignedAhead
     it "words the order with its payment and late or overpaid cents" testLinkText
   describe "late credits" $ do
     it "credits a late payment once per credit number, a taken number changing neither the rows nor the balance" testCreditLatePayment
@@ -344,6 +345,19 @@ testRefundWindow = do
   within [-30 * 86400, 0, 600] `shouldBe` [True, True, True]
   within [-30 * 86400 - 1, 601] `shouldBe` [False, False]
   signedWithin refundRequestSeconds signedRequestSeconds t0 maxBound `shouldBe` False
+
+testRefundSignedAhead :: IO ()
+testRefundSignedAhead = withServiceStore $ \st -> do
+  turns <- newTurns
+  source st "s" 10000
+  ahead <- signedRefund keyA "s" 10000 (RDAddress refundAddress) (at 5)
+  fmap rdCents <$> recordRefund turns st ahead t0 `shouldReturn` Right 10000
+  credit st "s" 10000
+  recordRefund turns st ahead (at 1) `shouldReturn` Left (RefundRequestRefused RQNotAfterRefund)
+  figures st "s" `shouldReturn` Just (10000, 20000, 10000)
+  next <- signedRefund keyA "s" 10000 (RDAddress refundAddress) (at 6)
+  fmap rdCents <$> recordRefund turns st next (at 5) `shouldReturn` Right 10000
+  figures st "s" `shouldReturn` Just (0, 20000, 20000)
 
 testLinkText :: IO ()
 testLinkText = do

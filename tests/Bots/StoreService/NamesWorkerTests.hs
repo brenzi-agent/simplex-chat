@@ -170,6 +170,7 @@ workerTests = describe "StoreService names: worker" $ do
     it "refuses an unknown reference, an order not failed, a failed code order and a failed chain read, changing nothing" testCloseRefused
     it "refuses an order changed during its chain check as changed, writing nothing" testCloseLostRace
     it "refunds the whole balance, its earlier credits included" testCloseWhole
+    it "refuses a refund request signed no later than a close's request dated ahead of the clock" testCloseSignedAhead
     it "rolls back the taken write and the credit when the refund is refused" testCloseRollback
     it "refuses to close an order with a recorded reversal of its payment, changing nothing" testCloseReversed
 
@@ -1704,10 +1705,13 @@ testRetryInNameTurn = withWorker $ \W {wCtx = ctx@Ctx {cOrders}} -> do
   nrPhase <$> stored ctx renamed `shouldReturn` nrPhase renamed
 
 closeOf :: Ctx -> NameRegistration -> IO Closed
-closeOf Ctx {cRandom, cOrders = OrdersEnv {oeStore, oeContracts, oeTurns, oeNow}} NameRegistration {nrId = rid@(RegistrationId ridText), nrOwner, nrPrice, nrPayment} = do
+closeOf = closeSignedAhead 0
+
+closeSignedAhead :: NominalDiffTime -> Ctx -> NameRegistration -> IO Closed
+closeSignedAhead ahead Ctx {cRandom, cOrders = OrdersEnv {oeStore, oeContracts, oeTurns, oeNow}} NameRegistration {nrId = rid@(RegistrationId ridText), nrOwner, nrPrice, nrPayment} = do
   balance <- maybe 0 blAmount <$> withTransaction oeStore (`getBalance` rid)
   key <- keyOfOwner cRandom nrOwner >>= maybe (fail "no test key of the order's owner") pure
-  req <- oeNow >>= signedRefund key ridText (nrPrice + balance) (requestedDestination nrPayment)
+  req <- oeNow >>= signedRefund key ridText (nrPrice + balance) (requestedDestination nrPayment) . addUTCTime ahead
   closeRegistration oeStore oeContracts oeTurns oeNow req
 
 requestedDestination :: OrderPayment -> RefundDestination
@@ -1836,3 +1840,14 @@ testCloseWhole = withWorker $ \W {wCtx = ctx@Ctx {cStore}} -> do
     other -> expectationFailure $ "not refunded: " <> show other
   nrPhase <$> stored ctx r `shouldReturn` OTaken orderTime
   figuresOf ctx r `shouldReturn` Just (0, whole, whole)
+
+testCloseSignedAhead :: IO ()
+testCloseSignedAhead = withWorker $ \W {wCtx = ctx@Ctx {cStore, cOrders}} -> do
+  r <- paidIn ctx aliceOrder failedPhase
+  let price = oPrice aliceOrder
+      RegistrationId rid = nrId r
+  closeSignedAhead 300 ctx r >>= \case
+    CLRefunded _ RefundRecord {rdCents} -> rdCents `shouldBe` price
+    other -> expectationFailure $ "not refunded: " <> show other
+  recordOwnerRefund (oeTurns cOrders) cStore rid price (addUTCTime 300 orderTime) `shouldReturn` Left (RefundRequestRefused RQNotAfterRefund)
+  recordOwnerRefund (oeTurns cOrders) cStore rid price (addUTCTime 301 orderTime) `shouldReturn` Left (RefundAmount 0)
