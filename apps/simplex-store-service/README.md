@@ -1722,7 +1722,7 @@ page cannot sign it again. Such an order with a stored reveal fails with the rea
 `signatureRefused`, logged at error and posted in the managed group as
 `names worker: registration <id> failed: its commitment is not the one the service's current configuration makes, so its stored signature is refused, …`,
 and support closes a paid one with `//close`, on its buyer's signed refund request; one without a
-stored reveal waits, and support closes a paid one so once its commitment lapses.
+stored reveal waits, and support closes a paid one the same way once its commitment lapses.
 
 A close of a failed order, and the worker's judgment of a register that did not go
 through, first run `confirmLanded`. It marks the order registered when `ownerOf` at the confirmation
@@ -2020,12 +2020,12 @@ refund request signed with the order's name key, the key of its owner's name cod
 simplex.domains order <reference> refund <cents> <destination> <timestamp>
 ```
 
-- `reference` is the order's invoice id or its registration id; the names page signs the registration
-  id only for an order without an invoice; `cents` is the balance; `destination` is `card` for an order paid by card, which Stripe refunds to
-  the card that paid, and the address the buyer gives for an order paid in Bitcoin or Monero, as
-  typed; `timestamp` is in seconds.
-- The numbers are written in decimal without leading zeros, and the destination as one word other
-  than `card` for an address.
+- `reference`: the order's invoice id or its registration id; the names page signs the registration
+  id only for an order without an invoice.
+- `cents`: the balance, in decimal without leading zeros.
+- `destination`: `card` for an order paid by card, which Stripe refunds to the card that paid; for an
+  order paid in Bitcoin or Monero, the address the buyer gives, as typed, one word other than `card`.
+- `timestamp`: in seconds, in decimal without leading zeros.
 - It is signed as the order requests are, with EIP-191 `personal_sign`; the signature is `0x` and
   130 lowercase hex digits, with s in the lower half of the group order and v 27 or 28.
 - The names page signs it and gives the buyer one line to send to chat@simplex.chat:
@@ -2057,8 +2057,8 @@ group](#balances-and-failed-orders-in-the-group)):
    provider's Dashboard.
 2. Run `//record_refund` with the buyer's line after its first word. The service recovers the
    request's signer, and records the refund only when:
-   - the signer is the order's owner; a request signed by another key, or with a field changed after
-     it was signed, is answered as one for an unknown reference;
+   - the signer is the order's owner; within the window below, a request signed by another key, or
+     with a field changed after it was signed, is answered as one for an unknown reference;
    - the destination is `card` for an order paid by card, and an address for an order paid in crypto;
      an order paid with a prepaid code is refunded nothing;
    - the cents equal the whole balance, which is set to 0, as part of a balance is never refunded.
