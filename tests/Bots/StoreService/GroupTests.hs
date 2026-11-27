@@ -5,6 +5,7 @@ module Bots.StoreService.GroupTests where
 import StoreService.Config (GroupConfig (..))
 import StoreService.Group (GroupAction (..), GroupEvent (..), TrackerAction (..), coalesceTrackerRefreshes, inertGroupConfig, noOwnerHint, orphanHint, trackerDecision)
 import StoreService.Group.Command
+import StoreService.Names.Signatures (RefundDestination (..), RefundRequest (..), parseSignature)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Time.Calendar (fromGregorian)
@@ -130,6 +131,13 @@ badgeGroupTests = describe "badge group" $ do
         `shouldBe` replicate 2 [False, False, False, True]
       groupCmdAction GRAdmin "/record_refund s" `shouldBe` IgnoreMsg
       p "/refund s 10000" `shouldBe` IgnoreMsg
+    it "parses a refund request's fields in the order of the signed message" $ do
+      let sig = "0x" <> T.replicate 128 "1" <> "1b"
+          address = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+          request reference destination =
+            RefundRequest {rqReference = reference, rqCents = 10000, rqDestination = destination, rqTimestamp = 1792828800, rqSignature = either error id $ parseSignature sig}
+      p ("/record_refund inv-s 10000 card 1792828800 " <> sig) `shouldBe` RunCmd (GCMoney $ MCRecordRefund $ request "inv-s" RDCard)
+      p ("/close s 10000 " <> address <> " 1792828800 " <> sig) `shouldBe` RunCmd (GCMoney $ MCClose $ request "s" $ RDAddress address)
     it "answers a malformed /balance, an unsigned /record_refund or /close and a malformed refund request with its usage" $
       map p ["/balance", "/balance s junk", "/record_refund s", "/record_refund s 10000", "/record_refund s 0", "/record_refund s -5", "/record_refund s 100.00", "/record_refund s 99999999999999999999", "/close", "/close s", "/close s junk"]
         `shouldBe` replicate 2 (ReplyText "Usage: /balance <reference>")

@@ -32,7 +32,7 @@ import Bots.StoreService.NamesContractsTests (nameExpiresCall, rentPriceAnswer, 
 import Bots.StoreService.WebTests (answerOf, blockedInSTM, capturingStderr, digestFixture, refusedWith, siteConfigJson, statusOf)
 import Bots.StoreService.NamesSearchTests (aliceHex)
 import qualified Bots.StoreService.NamesBalancesTests as Balances
-import Bots.StoreService.NamesOrdersTests (keyA, keyB)
+import Bots.StoreService.NamesOrdersTests (keyA, keyB, seconds)
 import Bots.StoreService.NamesStoreTests (issue, order, ownerA, placeCode, placePaid, reg, t0, usable, write)
 import Bots.StoreService.NamesOwnerTests (labelBytes, ownerOfSelector)
 import ChatClient
@@ -60,7 +60,6 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (NominalDiffTime, UTCTime (..), addUTCTime, getCurrentTime)
-import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Word (Word64)
 import Network.HTTP.Client (RequestBody (..), defaultManagerSettings, httpLbs, method, newManager, parseRequest, requestBody, requestHeaders, responseBody, responseHeaders)
@@ -538,7 +537,7 @@ signedBy :: Secp256k1PrivateKey -> Refund -> IO Text
 signedBy key r = refundArgs r <$> refundSignature key r
 
 nowSeconds :: IO Word64
-nowSeconds = floor . utcTimeToPOSIXSeconds <$> getCurrentTime
+nowSeconds = seconds <$> getCurrentTime
 
 daySeconds :: Word64
 daySeconds = 86400

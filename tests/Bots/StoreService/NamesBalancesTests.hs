@@ -9,7 +9,7 @@ module Bots.StoreService.NamesBalancesTests (namesBalancesTests, cardPaid, credi
 
 import Bots.StoreService.FakeEthNode (plainTerms)
 import Bots.StoreService.FakeStripe (FakeStripe (..), stripeObjectEvent, stripeSigHeader, withFakeStripe)
-import Bots.StoreService.NamesOrdersTests (Ctx (..), keyA, withOrders, withOrdersVia)
+import Bots.StoreService.NamesOrdersTests (Ctx (..), keyA, seconds, withOrders, withOrdersVia)
 import Bots.StoreService.NamesStoreTests (at, btc, hashFixture, newReg, ownerA, paidOrder, reg, t0, write)
 import Bots.StoreService.WebTests (agreed, blockedInSTM, lengthOf, rcv, statusOf, webRequestBody, withServiceStore)
 import Control.Concurrent.Async (async, asyncThreadId, wait)
@@ -35,7 +35,7 @@ import Simplex.Messaging.SimplexName (labelHash)
 import Simplex.Messaging.Util (safeDecodeUtf8)
 import StoreService.Config (StripeConfig (..))
 import StoreService.Names.Balances
-import StoreService.Names.Orders (OrdersEnv (..), refundRequestSeconds, signedWithin)
+import StoreService.Names.Orders (OrdersEnv (..), refundRequestSeconds, signedRequestSeconds, signedWithin)
 import StoreService.Names.Chain (Hex32 (..), TxHash (..))
 import StoreService.Names.Phases (RegistrationId (..))
 import StoreService.Names.Signatures (OrderFields (..), RefundDestination (..), RefundRequest (..), personalDigest, refundMessage)
@@ -157,7 +157,7 @@ refund st r cents = withTransaction st $ \db -> refundBalance db (RegistrationId
 signedRefund :: Secp256k1PrivateKey -> Text -> USDCents -> RefundDestination -> UTCTime -> IO RefundRequest
 signedRefund key rqReference rqCents rqDestination signedTime = do
   g <- C.newRandom
-  let rqTimestamp = floor $ utcTimeToPOSIXSeconds signedTime
+  let rqTimestamp = seconds signedTime
   rqSignature <- either error id <$> signRecoverable g key (personalDigest $ refundMessage rqReference rqCents rqDestination rqTimestamp)
   pure RefundRequest {rqReference, rqCents, rqDestination, rqTimestamp, rqSignature}
 
@@ -338,11 +338,11 @@ testRecordRefund = withServiceStore $ \st -> do
 
 testRefundWindow :: IO ()
 testRefundWindow = do
-  let secondsFrom offset = fromIntegral (floor (utcTimeToPOSIXSeconds t0) + offset :: Integer)
-      within = map (signedWithin refundRequestSeconds t0 . secondsFrom)
+  let secondsFrom offset = fromIntegral (toInteger (seconds t0) + offset)
+      within = map (signedWithin refundRequestSeconds signedRequestSeconds t0 . secondsFrom)
   within [-30 * 86400, 0, 600] `shouldBe` [True, True, True]
   within [-30 * 86400 - 1, 601] `shouldBe` [False, False]
-  signedWithin refundRequestSeconds t0 maxBound `shouldBe` False
+  signedWithin refundRequestSeconds signedRequestSeconds t0 maxBound `shouldBe` False
 
 testLinkText :: IO ()
 testLinkText = do

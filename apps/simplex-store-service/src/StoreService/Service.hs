@@ -104,7 +104,7 @@ import Simplex.Chat.Core (sendChatCmd, simplexChatCore)
 import Simplex.Chat.Options (CoreChatOpts (..))
 import Simplex.Chat.Options.DB (dbString)
 import Simplex.Chat.PaymentService (AppleTransactionFacts (..), ServicePayment (..), appleTransactionFacts)
-import Simplex.Chat.PaymentService.Types (InvoiceId (..), PaymentProvider (..), ServicePaymentMethod (SPMCard), StoreTransactionRef (..))
+import Simplex.Chat.PaymentService.Types (InvoiceId (..), PaymentProvider (..), StoreTransactionRef (..))
 import Simplex.Chat.Terminal (terminalChatConfig)
 import Simplex.Chat.Terminal.Main (simplexChatCLI')
 import Simplex.Chat.Types (AgentInvId (..), User (..))
@@ -471,9 +471,9 @@ requestRefusalText = \case
   RQOutsideWindow ->
     "the request was signed more than " <> tshow (refundRequestSeconds `div` 86400) <> " days before the service's clock or more than "
       <> tshow (signedRequestSeconds `div` 60) <> " minutes after it; ask the buyer to sign a new one"
-  RQDestination (OPInvoice SPMCard {} _) -> "the order was paid by card, which is refunded to its card, not to an address"
-  RQDestination (OPInvoice method _) -> "the order was paid by " <> textEncode method <> ", which is refunded to an address the buyer gives, not to a card"
-  RQDestination (OPCode _) -> "the order was paid with a prepaid code, so nothing is refunded"
+  RQCardOnly -> "the order was paid by card, which is refunded to its card, not to an address"
+  RQAddressOnly coin -> "the order was paid by " <> textEncode coin <> ", which is refunded to an address the buyer gives, not to a card"
+  RQPrepaidCode -> "the order was paid with a prepaid code, so nothing is refunded"
 
 destinationText :: RefundDestination -> T.Text
 destinationText = \case

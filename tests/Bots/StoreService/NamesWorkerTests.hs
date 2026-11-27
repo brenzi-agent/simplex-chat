@@ -1797,7 +1797,7 @@ testCloseRefused = withWorker $ \W {wCtx = ctx@Ctx {cNode, cOrders = OrdersEnv {
   queued <- paidIn ctx aliceOrder id
   unread <- paidIn ctx dynamisOrder failedPhase
   answerCall cNode (registrarOf cNode) (ownerOfSelector <> labelBytes "dynamis") $ Reverts $ unhex "37ed32e8"
-  forM_ [(queued, CFNotFailedPaid), (failedCode, CFRequestRefused $ RQDestination $ nrPayment failedCode), (unread, CFUnread)] $ \(r, refusal) -> do
+  forM_ [(queued, CFNotFailedPaid), (failedCode, CFRequestRefused RQPrepaidCode), (unread, CFUnread)] $ \(r, refusal) -> do
     (nrId r,) <$> closeOf ctx r `shouldReturn` (nrId r, CLRefused refusal)
     stored ctx r `shouldReturn` r
     figuresOf ctx r `shouldReturn` Nothing

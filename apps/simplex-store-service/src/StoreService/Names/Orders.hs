@@ -266,10 +266,10 @@ codeOrderInsert new@NewRegistration {nrgId, nrgOrder = OrderFields {ofLength}} c
 
 checkTimestamp :: UTCTime -> Word64 -> Either OrderRefusal ()
 checkTimestamp now timestamp =
-  unless (signedWithin signedRequestSeconds now timestamp) $ Left $ ORBadRequest "the timestamp is outside the window"
+  unless (signedWithin signedRequestSeconds signedRequestSeconds now timestamp) $ Left $ ORBadRequest "the timestamp is outside the window"
 
-signedWithin :: Integer -> UTCTime -> Word64 -> Bool
-signedWithin maxAge now timestamp = age <= fromInteger maxAge && negate age <= fromInteger signedRequestSeconds
+signedWithin :: Integer -> Integer -> UTCTime -> Word64 -> Bool
+signedWithin maxAge maxAhead now timestamp = age <= fromInteger maxAge && negate age <= fromInteger maxAhead
   where
     age = diffUTCTime now $ roundedToUTCTime $ RoundedSystemTime $ fromIntegral timestamp
 

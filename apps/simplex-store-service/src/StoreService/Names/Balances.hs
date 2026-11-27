@@ -24,14 +24,14 @@ import Data.Int (Int64)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (UTCTime)
-import Simplex.Chat.PaymentService.Types (CurrencyAmount (..), ServicePaymentMethod (SPMCard, SPMCrypto))
+import Simplex.Chat.PaymentService.Types (CryptoCurrency, CurrencyAmount (..), ServicePaymentMethod (SPMCard, SPMCrypto))
 import Simplex.Messaging.Agent.Store.Common (DBStore, withTransaction)
 import qualified Simplex.Messaging.Agent.Store.DB as DB
 import Simplex.Messaging.Encoding.String (StrEncoding (..), textEncode)
 import Simplex.Messaging.Eth.Address (recoverAddress)
 import Simplex.Messaging.Names.Record (USDCents)
 import Simplex.Messaging.Util (eitherToMaybe, safeDecodeUtf8, tshow, ($>>=))
-import StoreService.Names.Orders (OrdersEnv (..), refundRequestSeconds, signedWithin)
+import StoreService.Names.Orders (OrdersEnv (..), refundRequestSeconds, signedRequestSeconds, signedWithin)
 import StoreService.Names.Phases (RegistrationId (..), publish)
 import StoreService.Names.Registration (TermsAcceptance (..))
 import StoreService.Names.Signatures (RefundDestination (..), RefundRequest (..), personalDigest, refundMessage)
@@ -42,7 +42,7 @@ import StoreService.Orders (RegistrationChanged (..))
 import StoreService.Providers (Reversal (..))
 import StoreService.Store.Invoices (InvoiceRow (..), lockInvoice)
 
-data RequestRefusal = RQOutsideWindow | RQDestination OrderPayment
+data RequestRefusal = RQOutsideWindow | RQCardOnly | RQAddressOnly CryptoCurrency | RQPrepaidCode
   deriving (Eq, Show)
 
 -- | RefundAmount: the balance's amount now, which is not the cents given.
@@ -59,21 +59,21 @@ data RefundRecord = RefundRecord
 
 requestedOrder :: DBStore -> UTCTime -> RefundRequest -> IO (Either RequestRefusal (Maybe NameRegistration))
 requestedOrder st now RefundRequest {rqReference, rqCents, rqDestination, rqTimestamp, rqSignature}
-  | not (signedWithin refundRequestSeconds now rqTimestamp) = pure $ Left RQOutsideWindow
+  | not (signedWithin refundRequestSeconds signedRequestSeconds now rqTimestamp) = pure $ Left RQOutsideWindow
   | otherwise = do
       signer <- eitherToMaybe <$> recoverAddress rqSignature (personalDigest $ refundMessage rqReference rqCents rqDestination rqTimestamp)
       withTransaction st (\db -> balanceByReference db rqReference $>>= getRegistration db . fst) <&> \case
         Just r@NameRegistration {nrOwner, nrPayment}
-          | signer /= Just nrOwner -> Right Nothing
-          | refundsTo nrPayment rqDestination -> Right $ Just r
-          | otherwise -> Left $ RQDestination nrPayment
-        Nothing -> Right Nothing
+          | signer == Just nrOwner -> maybe (Right $ Just r) Left $ destinationRefusal nrPayment rqDestination
+        _ -> Right Nothing
 
-refundsTo :: OrderPayment -> RefundDestination -> Bool
-refundsTo payment destination = case (payment, destination) of
-  (OPInvoice SPMCard {} _, RDCard) -> True
-  (OPInvoice SPMCrypto {} _, RDAddress _) -> True
-  _ -> False
+destinationRefusal :: OrderPayment -> RefundDestination -> Maybe RequestRefusal
+destinationRefusal payment destination = case (payment, destination) of
+  (OPInvoice SPMCard {} _, RDCard) -> Nothing
+  (OPInvoice SPMCard {} _, RDAddress _) -> Just RQCardOnly
+  (OPInvoice SPMCrypto {} _, RDAddress _) -> Nothing
+  (OPInvoice (SPMCrypto coin) _, RDCard) -> Just $ RQAddressOnly coin
+  (OPCode _, _) -> Just RQPrepaidCode
 
 -- | The reference is the order's registration id or its name invoice's id. In the balance's turn and one transaction.
 recordRefund :: Turns -> DBStore -> RefundRequest -> UTCTime -> IO (Either RefundRefusal RefundRecord)
