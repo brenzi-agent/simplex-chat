@@ -681,7 +681,8 @@ from some contacts. Before the service starts on it:
    service numbers a new transaction after the key's mined transactions and the ones the copy saved,
    so a transaction in the pool that the copy does not hold can have the same nonce.
 2. Record again, with `//record_refund` in `--run-cli` or `/record_refund` in the group, each refund recorded after the copy, with the
-   buyer's request it was recorded with, or a new one in place of a request older than 30 days, and pay nothing: the copy holds
+   buyer's request it was recorded with, or a new one in place of a request older than 30 days and for
+   each refund of one order after the first, and pay nothing: the copy holds
    those balances unrefunded, so they could be refunded twice. The service logged each as
    `names: recorded a refund of <cents> cents for order <registration id>`.
 3. Revoke with `//revoke` each code spent or revoked after the copy, which the copy holds unspent, and
@@ -2043,10 +2044,10 @@ group](#balances-and-failed-orders-in-the-group)):
 ```
 
 1. Run `//balance <reference>` with the reference of the buyer's request. Nothing is recorded, and the
-   service answers the balance, what paid for it and the reference and cents of `//record_refund` for it:
+   service answers the balance, what paid for it and the cents of a refund request for it:
 
    ```
-   Order <id>: balance $100.00 (credited $100.00, refunded $0.00). Paid by: order <id> of <owner>: $100.00 by btc on invoice <invoice id> (provider reference <provider reference>). To record its refund: //record_refund <reference> 10000
+   Order <id>: balance $100.00 (credited $100.00, refunded $0.00). Paid by: order <id> of <owner>: $100.00 by btc on invoice <invoice id> (provider reference <provider reference>). To record its refund: //record_refund with the buyer's signed refund request for 10000 cents.
    ```
 
    `Paid by` names this order with its owner, the address that signed it, what its invoice paid and
@@ -2064,7 +2065,9 @@ group](#balances-and-failed-orders-in-the-group)):
    - the cents equal the whole balance, which is set to 0, as part of a balance is never refunded.
      With other cents nothing is recorded, and the service answers the balance;
    - the request was signed at most 30 days before the service's clock and at most 600 seconds
-     after it; the buyer signs a new one in place of an older one.
+     after it; the buyer signs a new one in place of an older one;
+   - the request's timestamp is after the order's last recorded refund; the buyer signs a new
+     request for each refund.
 3. The service answers `Recorded a refund of $100.00 for order <id>. Refund it now to <destination>, by: …`,
    with the request's destination, `the card` or the buyer's address, and what paid. Pay
    the balance's amount in US dollars back now, to that destination. The refund is

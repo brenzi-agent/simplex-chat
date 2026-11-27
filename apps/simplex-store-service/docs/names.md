@@ -517,10 +517,10 @@ sequenceDiagram
   Note over O,C: the service is stopped, then run with --run-cli
   O->>C: //balance REFERENCE
   C->>D: order, balance, the money paid for it
-  C-->>O: balance, credited, refunded, paid by, the reference and cents to record it
+  C-->>O: balance, credited, refunded, paid by, the cents of a refund request for it
   O->>C: //record_refund REFERENCE CENTS DESTINATION TIMESTAMP SIGNATURE
   C->>D: the order of the reference, its owner the request's signer
-  C->>D: under the balance's lock: amount 0, refunded raised by the cents
+  C->>D: under the balance's lock, a request signed after its last refund: amount 0, refunded raised by the cents, refunded_at now
   C-->>O: Recorded a refund ... Refund it now to DESTINATION, by: PAYMENT.
   O--)B: money paid back by hand to the destination (outside the service)
 ```
@@ -528,6 +528,7 @@ sequenceDiagram
 Notes:
 
 - A refund is recorded only on the request `simplex.domains order <reference> refund <cents> <destination> <timestamp>`, signed with EIP-191 by the order's owner, its destination `card` for a card payment and an address for a crypto payment, signed at most 30 days before the service's clock and at most 600 seconds after it. Within that window, a request of another signer, or with a field changed after it was signed, is answered as one for an unknown reference. Nothing is recorded on any refusal ([`Names/Balances.hs`](../src/StoreService/Names/Balances.hs) `requestedOrder`, [`Names/Signatures.hs`](../src/StoreService/Names/Signatures.hs) `refundMessage`, [`Names/Orders.hs`](../src/StoreService/Names/Orders.hs) `signedWithin`).
+- The request's timestamp must be after the balance's `refunded_at`, the time of its last recorded refund, which is read in the refund's transaction; the buyer signs a new request for each refund ([`Names/Balances.hs`](../src/StoreService/Names/Balances.hs) `signedAfterRefund`, `recordRefund`).
 - The refund must equal the whole balance ([`Names/Balances.hs`](../src/StoreService/Names/Balances.hs) `recordRefund`, [`Names/Store.hs`](../src/StoreService/Names/Store.hs) `refundBalance`).
 - A balance is credited when a paid order is set `taken` or fails at the end of its month (its whole price), when support closes a failed order, and with late or extra money; it is spent only on a name selected for its own order after a reset (3.6), and on no other order ([`Names/Worker.hs`](../src/StoreService/Names/Worker.hs) `endOrder`, `refundTaken`, [`Names/LateCredits.hs`](../src/StoreService/Names/LateCredits.hs), [`Names/Orders.hs`](../src/StoreService/Names/Orders.hs) `selectName`).
 - The provider interface offers create, the refusal of an invoice it cannot make, read, cancel, list, rate and webhook verification, so the money is paid back by hand ([`Providers.hs:120-130`](../src/StoreService/Providers.hs#L120-L130)). The buyer's email to chat@simplex.chat is described in the README; the page code is in the submodule ([README, "Refunding a name balance"](../README.md#refunding-a-name-balance)).
@@ -553,13 +554,13 @@ sequenceDiagram
     C->>D: order set registered, or ended when its registration was ended in its dispute period
     C-->>O: Nothing refunded: the register of order ID went through
   else not registered
-    C->>D: under the balance's lock, one transaction: order set taken, its stored reveal cleared, price credited, the whole balance, the request's cents, recorded as refunded
+    C->>D: under the balance's lock, one transaction, a request signed after its last refund: order set taken, its stored reveal cleared, price credited, the whole balance, the request's cents, recorded as refunded
     C-->>O: Closed order ID, failed or lapsed unsigned at TIME ... Check at the provider ...#59; if not, refund it now to DESTINATION, by: PAYMENT.
     O--)B: money paid back by hand to the destination, unless refunded before (outside the service)
   end
 ```
 
-- The request is the one given to `//record_refund`, refused alike. Its cents must be the whole balance recorded as refunded at the close, the price with any money the balance already held; with other cents the transaction is rolled back, and nothing is recorded (`refundTaken` in [`Names/Worker.hs`](../src/StoreService/Names/Worker.hs)).
+- The request is the one given to `//record_refund`, refused alike. Its cents must be the whole balance recorded as refunded at the close, the price with any money the balance already held; with other cents, or a timestamp not after the balance's `refunded_at`, the transaction is rolled back, and nothing is recorded (`refundTaken` in [`Names/Worker.hs`](../src/StoreService/Names/Worker.hs)).
 - Only a failed or lapsed unsigned order paid by invoice is closed ([`Names/Worker.hs`](../src/StoreService/Names/Worker.hs) `closeRegistration`, `refundTaken`, [`Names/Orders.hs`](../src/StoreService/Names/Orders.hs) `checkLanded`). An order with a recorded dispute or refund of its payment is refused, writing nothing, as nothing is refunded (`reversalRecorded` in [`Names/Store.hs`](../src/StoreService/Names/Store.hs)).
 - The answer names the time of the failure or the lapse, as failed orders were refunded at the provider by hand before `//close` existed ([`Service.hs`](../src/StoreService/Service.hs) `closeOrderCmd`, [README, "Closing a failed order"](../README.md#closing-a-failed-order)).
 
