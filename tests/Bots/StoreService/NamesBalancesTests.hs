@@ -18,7 +18,7 @@ import Control.Monad (forM_)
 import qualified Data.Aeson as J
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
-import Data.Maybe (isJust)
+import Data.Maybe (fromJust, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
@@ -38,7 +38,7 @@ import StoreService.Names.Balances
 import StoreService.Names.Orders (OrdersEnv (..), refundRequestSeconds, signedRequestSeconds, signedWithin)
 import StoreService.Names.Chain (Hex32 (..), TxHash (..))
 import StoreService.Names.Phases (RegistrationId (..))
-import StoreService.Names.Signatures (OrderFields (..), RefundDestination (..), RefundRequest (..), personalDigest, refundMessage)
+import StoreService.Names.Signatures (CryptoAddress, OrderFields (..), RefundDestination (..), RefundRequest (..), cryptoAddress, personalDigest, refundMessage)
 import StoreService.Names.Store
 import StoreService.Names.Turns (Turns, newTurns, withBalanceTurn, withLabelTurn)
 import StoreService.Names.View (addressText)
@@ -161,8 +161,8 @@ signedRefund key rqReference rqCents rqDestination signedTime = do
   rqSignature <- either error id <$> signRecoverable g key (personalDigest $ refundMessage rqReference rqCents rqDestination rqTimestamp)
   pure RefundRequest {rqReference, rqCents, rqDestination, rqTimestamp, rqSignature}
 
-refundAddress :: Text
-refundAddress = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+refundAddress :: CryptoAddress
+refundAddress = fromJust $ cryptoAddress "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
 
 recordOwnerRefund :: Turns -> DBStore -> Text -> USDCents -> UTCTime -> IO (Either RefundRefusal RefundRecord)
 recordOwnerRefund turns st ref cents now = signedRefund keyA ref cents (RDAddress refundAddress) now >>= \req -> recordRefund turns st req now
@@ -326,7 +326,7 @@ testRecordRefund = withServiceStore $ \st -> do
   placeOrderRow st "plain" False 20000 (at 60)
   let refundOf :: Text -> USDCents -> UTCTime -> IO (Either RefundRefusal RefundRecord)
       refundOf ref cents now = recordOwnerRefund turns st ref cents now
-  refundOf "nothing" 10000 t0 `shouldReturn` Left RefundNoOrder
+  refundOf "nothing" 10000 t0 `shouldReturn` Left (RefundRequestRefused RQNoOrder)
   refundOf "plain" 20000 t0 `shouldReturn` Left RefundNoBalance
   refundOf "s" 9000 t0 `shouldReturn` Left (RefundAmount 10000)
   link <- withTransaction st $ \db -> balanceLink db (RegistrationId "s")

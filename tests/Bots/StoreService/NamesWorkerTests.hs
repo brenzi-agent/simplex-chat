@@ -1791,7 +1791,7 @@ testCloseLanded = withWorker $ \W {wCtx = ctx} -> do
 
 testCloseRefused :: IO ()
 testCloseRefused = withWorker $ \W {wCtx = ctx@Ctx {cNode, cOrders = OrdersEnv {oeStore, oeContracts, oeTurns, oeNow}}} -> do
-  (oeNow >>= signedRefund keyA "t2Jk8RmQ4vXw9NcP3yLb6g" 10000 (RDAddress refundAddress) >>= closeRegistration oeStore oeContracts oeTurns oeNow) `shouldReturn` CLRefused CFNoOrder
+  (oeNow >>= signedRefund keyA "t2Jk8RmQ4vXw9NcP3yLb6g" 10000 (RDAddress refundAddress) >>= closeRegistration oeStore oeContracts oeTurns oeNow) `shouldReturn` CLRefused (CFRequestRefused RQNoOrder)
   answerFree ctx "carolbakery"
   (failedCode, _) <- codeIn ctx 8 (byB aliceOrder) {oLabel = "carolbakery", oSecret = secretOf 2} failedPhase
   queued <- paidIn ctx aliceOrder id

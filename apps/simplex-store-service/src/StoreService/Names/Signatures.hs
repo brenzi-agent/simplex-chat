@@ -16,6 +16,9 @@ module StoreService.Names.Signatures
     OrderAction (..),
     orderRequestMessage,
     RefundDestination (..),
+    CryptoAddress,
+    cryptoAddress,
+    cryptoAddressText,
     RefundRequest (..),
     refundMessage,
     parseChecksumAddress,
@@ -31,6 +34,7 @@ import Data.Bifunctor (first)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
+import Data.Char (isSpace)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeLatin1, encodeUtf8)
@@ -116,16 +120,24 @@ instance TextEncoding OrderAction where
 orderRequestMessage :: Text -> OrderAction -> Word64 -> ByteString
 orderRequestMessage oid action timestamp = message ["order", oid, textEncode action, tshow timestamp]
 
-data RefundDestination = RDCard | RDAddress Text
+data RefundDestination = RDCard | RDAddress CryptoAddress
   deriving (Eq, Show)
+
+newtype CryptoAddress = CryptoAddress {cryptoAddressText :: Text}
+  deriving (Eq, Show)
+
+cryptoAddress :: Text -> Maybe CryptoAddress
+cryptoAddress t
+  | T.null t || T.any isSpace t || t == textEncode RDCard = Nothing
+  | otherwise = Just $ CryptoAddress t
 
 instance TextEncoding RefundDestination where
   textEncode = \case
     RDCard -> "card"
-    RDAddress address -> address
+    RDAddress address -> cryptoAddressText address
   textDecode = \case
     "card" -> Just RDCard
-    address -> Just $ RDAddress address
+    t -> RDAddress <$> cryptoAddress t
 
 data RefundRequest = RefundRequest
   { rqReference :: Text,

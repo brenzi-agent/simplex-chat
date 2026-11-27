@@ -42,11 +42,11 @@ import StoreService.Orders (RegistrationChanged (..))
 import StoreService.Providers (Reversal (..))
 import StoreService.Store.Invoices (InvoiceRow (..), lockInvoice)
 
-data RequestRefusal = RQOutsideWindow | RQCardOnly | RQAddressOnly CryptoCurrency | RQPrepaidCode
+data RequestRefusal = RQOutsideWindow | RQNoOrder | RQCardOnly | RQAddressOnly CryptoCurrency | RQPrepaidCode
   deriving (Eq, Show)
 
 -- | RefundAmount: the balance's amount now, which is not the cents given.
-data RefundRefusal = RefundNoOrder | RefundNoBalance | RefundAmount USDCents | RefundRequestRefused RequestRefusal
+data RefundRefusal = RefundNoBalance | RefundAmount USDCents | RefundRequestRefused RequestRefusal
   deriving (Eq, Show)
 
 -- | The order and the money paid for it, for support to pay it back by the method that paid it.
@@ -57,15 +57,15 @@ data RefundRecord = RefundRecord
   }
   deriving (Eq, Show)
 
-requestedOrder :: DBStore -> UTCTime -> RefundRequest -> IO (Either RequestRefusal (Maybe NameRegistration))
+requestedOrder :: DBStore -> UTCTime -> RefundRequest -> IO (Either RequestRefusal NameRegistration)
 requestedOrder st now RefundRequest {rqReference, rqCents, rqDestination, rqTimestamp, rqSignature}
   | not (signedWithin refundRequestSeconds signedRequestSeconds now rqTimestamp) = pure $ Left RQOutsideWindow
   | otherwise = do
       signer <- eitherToMaybe <$> recoverAddress rqSignature (personalDigest $ refundMessage rqReference rqCents rqDestination rqTimestamp)
       withTransaction st (\db -> balanceByReference db rqReference $>>= getRegistration db . fst) <&> \case
         Just r@NameRegistration {nrOwner, nrPayment}
-          | signer == Just nrOwner -> maybe (Right $ Just r) Left $ destinationRefusal nrPayment rqDestination
-        _ -> Right Nothing
+          | signer == Just nrOwner -> maybe (Right r) Left $ destinationRefusal nrPayment rqDestination
+        _ -> Left RQNoOrder
 
 destinationRefusal :: OrderPayment -> RefundDestination -> Maybe RequestRefusal
 destinationRefusal payment destination = case (payment, destination) of
@@ -80,8 +80,7 @@ recordRefund :: Turns -> DBStore -> RefundRequest -> UTCTime -> IO (Either Refun
 recordRefund turns st req@RefundRequest {rqCents = cents} now =
   requestedOrder st now req >>= \case
     Left refused -> pure $ Left $ RefundRequestRefused refused
-    Right Nothing -> pure $ Left RefundNoOrder
-    Right (Just NameRegistration {nrId}) -> withBalanceTurn turns nrId $ withTransaction st $ refund nrId
+    Right NameRegistration {nrId} -> withBalanceTurn turns nrId $ withTransaction st $ refund nrId
   where
     refund rid@(RegistrationId r) db =
       refundable db rid $

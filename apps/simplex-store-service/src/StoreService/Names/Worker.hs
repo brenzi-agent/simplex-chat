@@ -610,7 +610,7 @@ reasonText = \case
 data Closed = CLRegistered RegistrationId | CLEnded RegistrationId | CLRefunded UTCTime RefundRecord | CLRefused CloseRefusal
   deriving (Eq, Show)
 
-data CloseRefusal = CFNoOrder | CFNotFailedPaid | CFMonthEnded | CFUnread | CFChanged | CFBalanceChanged | CFReversed | CFAmount USDCents | CFRequestRefused RequestRefusal
+data CloseRefusal = CFNotFailedPaid | CFMonthEnded | CFUnread | CFChanged | CFBalanceChanged | CFReversed | CFAmount USDCents | CFRequestRefused RequestRefusal
   deriving (Eq, Show)
 
 newtype CloseRefused = CloseRefused CloseRefusal
@@ -623,8 +623,7 @@ closeRegistration st ct turns clock req@RefundRequest {rqCents} = do
   now <- clock
   requestedOrder st now req >>= \case
     Left refusal -> refused $ CFRequestRefused refusal
-    Right Nothing -> refused CFNoOrder
-    Right (Just r) ->
+    Right r ->
       withRegistrationTurn st turns r (closeFailed now) <&> \case
         Just (Right closed) -> closed
         _ -> CLRefused CFChanged

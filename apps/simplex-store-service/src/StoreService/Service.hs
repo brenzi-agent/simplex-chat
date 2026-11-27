@@ -54,7 +54,7 @@ import StoreService.Names.Orders (ordersEnv, refundRequestSeconds, signedRequest
 import StoreService.Names.Phases (RegistrationId (..))
 import StoreService.Names.Records (runRecordEdits)
 import StoreService.Names.Sender (checkPendingSignatures, runSender)
-import StoreService.Names.Signatures (RefundDestination (..), RefundRequest (..))
+import StoreService.Names.Signatures (RefundDestination (..), RefundRequest (..), cryptoAddressText)
 import StoreService.Names.Store (Balance (..), BalanceLink (..), CmdSource (..), LateCredit (..), OrderPayment (..), balanceByReference, balanceLink, creditCents)
 import StoreService.Names.Turns (Turns, newTurns)
 import StoreService.Names.View (addressText)
@@ -461,13 +461,13 @@ refundBalanceCmd turns ChatController {chatStore} req@RefundRequest {rqReference
     Left e -> Left "The refund could not be recorded." <$ logError ("names: recording a refund failed: " <> tshow e)
   where
     refusalText = \case
-      RefundNoOrder -> "no order has the reference " <> ref
       RefundNoBalance -> "the order of " <> ref <> " has no balance"
       RefundAmount amount -> "the balance is " <> dollars amount <> " now, not " <> dollars cents
-      RefundRequestRefused refusal -> requestRefusalText refusal
+      RefundRequestRefused refusal -> requestRefusalText ref refusal
 
-requestRefusalText :: RequestRefusal -> T.Text
-requestRefusalText = \case
+requestRefusalText :: T.Text -> RequestRefusal -> T.Text
+requestRefusalText ref = \case
+  RQNoOrder -> "no order has the reference " <> ref
   RQOutsideWindow ->
     "the request was signed more than " <> tshow (refundRequestSeconds `div` 86400) <> " days before the service's clock or more than "
       <> tshow (signedRequestSeconds `div` 60) <> " minutes after it; ask the buyer to sign a new one"
@@ -478,7 +478,7 @@ requestRefusalText = \case
 destinationText :: RefundDestination -> T.Text
 destinationText = \case
   RDCard -> "the card"
-  RDAddress address -> address
+  RDAddress address -> cryptoAddressText address
 
 newConsoleChain :: NamesConfig -> IO (SimplexTLD, Int, ChainClient)
 newConsoleChain NamesConfig {nTLD, nMinPriceCentsPerYear, nChain} = do
@@ -503,7 +503,6 @@ closeOrderCmd source turns (tld, minPriceCentsPerYear, chain) ChatController {ch
     Left e -> Left "The order could not be closed." <$ logError ("names: closing an order failed: " <> tshow e)
   where
     refusalText = \case
-      CFNoOrder -> "no order has the reference " <> ref
       CFNotFailedPaid -> "the order of " <> ref <> " is not a failed or lapsed unsigned order paid by invoice"
       CFMonthEnded -> "the order of " <> ref <> " failed at the end of the month from its payment, and the money paid for it has been added to its balance; record its refund with " <> spelledCmd source "record_refund"
       CFUnread -> "the chain could not be read; " <> again
@@ -511,7 +510,7 @@ closeOrderCmd source turns (tld, minPriceCentsPerYear, chain) ChatController {ch
       CFBalanceChanged -> "the balance of the order of " <> ref <> " changed meanwhile; " <> again
       CFReversed -> "a reversal of the payment of the order of " <> ref <> " was recorded, so nothing is refunded"
       CFAmount amount -> "the close records a refund of " <> dollars amount <> ", not " <> dollars cents
-      CFRequestRefused refusal -> requestRefusalText refusal
+      CFRequestRefused refusal -> requestRefusalText ref refusal
     again = "run " <> spelledCmd source "close" <> " again"
 
 -- | The balance's order and the money paid for it.
