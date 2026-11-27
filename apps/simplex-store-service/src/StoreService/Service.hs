@@ -54,7 +54,7 @@ import StoreService.Names.Orders (ordersEnv, refundRequestSeconds, signedRequest
 import StoreService.Names.Phases (RegistrationId (..))
 import StoreService.Names.Records (runRecordEdits)
 import StoreService.Names.Sender (checkPendingSignatures, runSender)
-import StoreService.Names.Signatures (RefundDestination (..), RefundRequest (..), cryptoAddressText)
+import StoreService.Names.Signatures (RefundDestination (..), RefundRequest (..))
 import StoreService.Names.Store (Balance (..), BalanceLink (..), CmdSource (..), LateCredit (..), OrderPayment (..), balanceByReference, balanceLink, creditCents)
 import StoreService.Names.Turns (Turns, newTurns)
 import StoreService.Names.View (addressText)
@@ -478,7 +478,7 @@ requestRefusalText ref = \case
 destinationText :: RefundDestination -> T.Text
 destinationText = \case
   RDCard -> "the card"
-  RDAddress address -> cryptoAddressText address
+  RDAddress address -> textEncode address
 
 newConsoleChain :: NamesConfig -> IO (SimplexTLD, Int, ChainClient)
 newConsoleChain NamesConfig {nTLD, nMinPriceCentsPerYear, nChain} = do

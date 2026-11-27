@@ -48,6 +48,7 @@ module Bots.StoreService.NamesOrdersTests
     registrationOf,
     keyA,
     keyB,
+    keyOfOwner,
     ownerAText,
     ownerBText,
     yearsDuration,
@@ -603,12 +604,14 @@ requestSignature ctx@Ctx {cStore, cRandom, cClock} route action = case T.splitOn
   where
     ownedBy oid readRid =
       readRid >>= maybe (pure Nothing) (\rid -> withTransaction cStore (`getRegistration` rid)) >>= \case
-        Just NameRegistration {nrOwner} -> ownerKey nrOwner >>= traverse (signedAt oid)
+        Just NameRegistration {nrOwner} -> keyOfOwner cRandom nrOwner >>= traverse (signedAt oid)
         Nothing -> pure Nothing
-    ownerKey owner = listToMaybe <$> filterM (fmap (== owner) . addressFromPrivateKey cRandom) [keyA, keyB]
     signedAt oid key = do
       t <- seconds <$> readIORef cClock
       (\sig -> (t, sig)) <$> signWith ctx key (orderRequestMessage oid action t)
+
+keyOfOwner :: TVar ChaChaDRG -> Address -> IO (Maybe Secp256k1PrivateKey)
+keyOfOwner g owner = listToMaybe <$> filterM (fmap (== owner) . addressFromPrivateKey g) [keyA, keyB]
 
 postOrder :: Ctx -> J.Object -> IO (Int, Maybe J.Object)
 postOrder ctx = post ctx "/api/invoice" . J.encode

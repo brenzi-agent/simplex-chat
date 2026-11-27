@@ -64,16 +64,16 @@ requestedOrder st now RefundRequest {rqReference, rqCents, rqDestination, rqTime
       signer <- eitherToMaybe <$> recoverAddress rqSignature (personalDigest $ refundMessage rqReference rqCents rqDestination rqTimestamp)
       withTransaction st (\db -> balanceByReference db rqReference $>>= getRegistration db . fst) <&> \case
         Just r@NameRegistration {nrOwner, nrPayment}
-          | signer == Just nrOwner -> maybe (Right r) Left $ destinationRefusal nrPayment rqDestination
+          | signer == Just nrOwner -> r <$ checkDestination nrPayment rqDestination
         _ -> Left RQNoOrder
 
-destinationRefusal :: OrderPayment -> RefundDestination -> Maybe RequestRefusal
-destinationRefusal payment destination = case (payment, destination) of
-  (OPInvoice SPMCard {} _, RDCard) -> Nothing
-  (OPInvoice SPMCard {} _, RDAddress _) -> Just RQCardOnly
-  (OPInvoice SPMCrypto {} _, RDAddress _) -> Nothing
-  (OPInvoice (SPMCrypto coin) _, RDCard) -> Just $ RQAddressOnly coin
-  (OPCode _, _) -> Just RQPrepaidCode
+checkDestination :: OrderPayment -> RefundDestination -> Either RequestRefusal ()
+checkDestination payment destination = case (payment, destination) of
+  (OPInvoice SPMCard {} _, RDCard) -> Right ()
+  (OPInvoice SPMCard {} _, RDAddress _) -> Left RQCardOnly
+  (OPInvoice SPMCrypto {} _, RDAddress _) -> Right ()
+  (OPInvoice (SPMCrypto coin) _, RDCard) -> Left $ RQAddressOnly coin
+  (OPCode _, _) -> Left RQPrepaidCode
 
 -- | The reference is the order's registration id or its name invoice's id. In the balance's turn and one transaction.
 recordRefund :: Turns -> DBStore -> RefundRequest -> UTCTime -> IO (Either RefundRefusal RefundRecord)

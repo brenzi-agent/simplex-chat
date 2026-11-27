@@ -58,7 +58,6 @@ import StoreService.Names.Sender
 import StoreService.Names.Signatures (OrderAction (..), RefundDestination (..))
 import StoreService.Names.Store
 import StoreService.Names.Turns (withBalanceTurn, withLabelTurn)
-import StoreService.Names.View (addressText)
 import StoreService.Names.Worker
 import StoreService.Providers (Reversal (..))
 import StoreService.Store.Invoices (InvoiceRow (..), getInvoice)
@@ -1705,13 +1704,11 @@ testRetryInNameTurn = withWorker $ \W {wCtx = ctx@Ctx {cOrders}} -> do
   nrPhase <$> stored ctx renamed `shouldReturn` nrPhase renamed
 
 closeOf :: Ctx -> NameRegistration -> IO Closed
-closeOf Ctx {cOrders = OrdersEnv {oeStore, oeContracts, oeTurns, oeNow}} NameRegistration {nrId = rid@(RegistrationId ridText), nrOwner, nrPrice, nrPayment} = do
+closeOf Ctx {cRandom, cOrders = OrdersEnv {oeStore, oeContracts, oeTurns, oeNow}} NameRegistration {nrId = rid@(RegistrationId ridText), nrOwner, nrPrice, nrPayment} = do
   balance <- maybe 0 blAmount <$> withTransaction oeStore (`getBalance` rid)
-  req <- oeNow >>= signedRefund (ownerKey nrOwner) ridText (nrPrice + balance) (requestedDestination nrPayment)
+  key <- keyOfOwner cRandom nrOwner >>= maybe (fail "no test key of the order's owner") pure
+  req <- oeNow >>= signedRefund key ridText (nrPrice + balance) (requestedDestination nrPayment)
   closeRegistration oeStore oeContracts oeTurns oeNow req
-
-ownerKey :: Address -> Secp256k1PrivateKey
-ownerKey owner = if addressText owner == ownerAText then keyA else keyB
 
 requestedDestination :: OrderPayment -> RefundDestination
 requestedDestination = \case

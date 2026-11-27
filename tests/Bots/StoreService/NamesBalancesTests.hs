@@ -29,7 +29,7 @@ import Simplex.Messaging.Agent.Store.Common (DBStore, withTransaction)
 import qualified Simplex.Messaging.Agent.Store.DB as DB
 import qualified Simplex.Messaging.Crypto as C
 import Simplex.Messaging.Crypto.Secp256k1 (Secp256k1PrivateKey, signRecoverable)
-import Simplex.Messaging.Encoding.String (StrEncoding (..))
+import Simplex.Messaging.Encoding.String (StrEncoding (..), TextEncoding (..))
 import Simplex.Messaging.Names.Record (USDCents)
 import Simplex.Messaging.SimplexName (labelHash)
 import Simplex.Messaging.Util (safeDecodeUtf8)
@@ -38,7 +38,7 @@ import StoreService.Names.Balances
 import StoreService.Names.Orders (OrdersEnv (..), refundRequestSeconds, signedRequestSeconds, signedWithin)
 import StoreService.Names.Chain (Hex32 (..), TxHash (..))
 import StoreService.Names.Phases (RegistrationId (..))
-import StoreService.Names.Signatures (CryptoAddress, OrderFields (..), RefundDestination (..), RefundRequest (..), cryptoAddress, personalDigest, refundMessage)
+import StoreService.Names.Signatures (CryptoAddress, OrderFields (..), RefundDestination (..), RefundRequest (..), personalDigest, refundMessage)
 import StoreService.Names.Store
 import StoreService.Names.Turns (Turns, newTurns, withBalanceTurn, withLabelTurn)
 import StoreService.Names.View (addressText)
@@ -162,7 +162,7 @@ signedRefund key rqReference rqCents rqDestination signedTime = do
   pure RefundRequest {rqReference, rqCents, rqDestination, rqTimestamp, rqSignature}
 
 refundAddress :: CryptoAddress
-refundAddress = fromJust $ cryptoAddress "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+refundAddress = fromJust $ textDecode "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
 
 recordOwnerRefund :: Turns -> DBStore -> Text -> USDCents -> UTCTime -> IO (Either RefundRefusal RefundRecord)
 recordOwnerRefund turns st ref cents now = signedRefund keyA ref cents (RDAddress refundAddress) now >>= \req -> recordRefund turns st req now

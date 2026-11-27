@@ -5,7 +5,7 @@ module Bots.StoreService.GroupTests where
 import StoreService.Config (GroupConfig (..))
 import StoreService.Group (GroupAction (..), GroupEvent (..), TrackerAction (..), coalesceTrackerRefreshes, inertGroupConfig, noOwnerHint, orphanHint, trackerDecision)
 import StoreService.Group.Command
-import StoreService.Names.Signatures (RefundDestination (..), RefundRequest (..), cryptoAddress, cryptoAddressText, parseSignature)
+import StoreService.Names.Signatures (CryptoAddress, RefundDestination (..), RefundRequest (..), parseSignature)
 import Data.Maybe (fromJust)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
@@ -139,12 +139,14 @@ badgeGroupTests = describe "badge group" $ do
           request reference destination =
             RefundRequest {rqReference = reference, rqCents = 10000, rqDestination = destination, rqTimestamp = 1792828800, rqSignature = either error id $ parseSignature sig}
       p ("/record_refund inv-s 10000 card 1792828800 " <> sig) `shouldBe` RunCmd (GCMoney $ MCRecordRefund $ request "inv-s" RDCard)
-      p ("/close s 10000 " <> address <> " 1792828800 " <> sig) `shouldBe` RunCmd (GCMoney $ MCClose $ request "s" $ RDAddress $ fromJust $ cryptoAddress address)
+      p ("/close s 10000 " <> address <> " 1792828800 " <> sig) `shouldBe` RunCmd (GCMoney $ MCClose $ request "s" $ RDAddress $ fromJust $ textDecode address)
     it "reads a refund destination as card or as one word of a crypto address, and writes it back as read" $ do
       let address = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
-      map cryptoAddress ["", "bc1q w508", "card"] `shouldBe` replicate 3 Nothing
-      cryptoAddressText <$> cryptoAddress address `shouldBe` Just address
-      map (fmap textEncode . (textDecode :: T.Text -> Maybe RefundDestination)) ["card", address] `shouldBe` [Just "card", Just address]
+          destination :: T.Text -> Maybe RefundDestination
+          destination = textDecode
+      map destination ["", "bc1q w508"] `shouldBe` replicate 2 Nothing
+      (textDecode "card" :: Maybe CryptoAddress) `shouldBe` Nothing
+      map (fmap textEncode . destination) ["card", address] `shouldBe` [Just "card", Just address]
     it "answers a malformed /balance, an unsigned /record_refund or /close and a malformed refund request with its usage" $
       map p ["/balance", "/balance s junk", "/record_refund s", "/record_refund s 10000", "/record_refund s 0", "/record_refund s -5", "/record_refund s 100.00", "/record_refund s 99999999999999999999", "/close", "/close s", "/close s junk"]
         `shouldBe` replicate 2 (ReplyText "Usage: /balance <reference>")

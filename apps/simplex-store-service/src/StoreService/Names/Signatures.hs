@@ -17,8 +17,6 @@ module StoreService.Names.Signatures
     orderRequestMessage,
     RefundDestination (..),
     CryptoAddress,
-    cryptoAddress,
-    cryptoAddressText,
     RefundRequest (..),
     refundMessage,
     parseChecksumAddress,
@@ -126,21 +124,19 @@ data RefundDestination = RDCard | RDAddress CryptoAddress
 newtype CryptoAddress = CryptoAddress Text
   deriving (Eq, Show)
 
-cryptoAddressText :: CryptoAddress -> Text
-cryptoAddressText (CryptoAddress t) = t
-
-cryptoAddress :: Text -> Maybe CryptoAddress
-cryptoAddress t
-  | T.null t || T.any isSpace t || t == textEncode RDCard = Nothing
-  | otherwise = Just $ CryptoAddress t
+instance TextEncoding CryptoAddress where
+  textEncode (CryptoAddress t) = t
+  textDecode t
+    | T.null t || T.any isSpace t || t == textEncode RDCard = Nothing
+    | otherwise = Just $ CryptoAddress t
 
 instance TextEncoding RefundDestination where
   textEncode = \case
     RDCard -> "card"
-    RDAddress address -> cryptoAddressText address
+    RDAddress address -> textEncode address
   textDecode = \case
     "card" -> Just RDCard
-    t -> RDAddress <$> cryptoAddress t
+    t -> RDAddress <$> textDecode t
 
 data RefundRequest = RefundRequest
   { rqReference :: Text,
