@@ -16,6 +16,7 @@ module StoreService.Names.Orders
     Landing (..),
     maxSealedChars,
     signedRequestSeconds,
+    refundRequestSeconds,
     SignedOrderFields,
     SentFields (..),
     SignedFields (..),
@@ -31,6 +32,7 @@ module StoreService.Names.Orders
     placeCodeOrder,
     codeOrderInsert,
     checkTimestamp,
+    signedWithin,
     checkDuration,
     orderYears,
     checkTerms,
@@ -156,6 +158,9 @@ maxSealedChars = 11095
 signedRequestSeconds :: Integer
 signedRequestSeconds = 600
 
+refundRequestSeconds :: Integer
+refundRequestSeconds = 30 * 86400
+
 -- | The signed fields of an order, or of a name selected for one, with their timestamp and signature.
 type SignedOrderFields = (OrderFields, Word64, RecoverableSignature)
 
@@ -261,7 +266,12 @@ codeOrderInsert new@NewRegistration {nrgId, nrgOrder = OrderFields {ofLength}} c
 
 checkTimestamp :: UTCTime -> Word64 -> Either OrderRefusal ()
 checkTimestamp now timestamp =
-  unless (abs (diffUTCTime (roundedToUTCTime $ RoundedSystemTime $ fromIntegral timestamp) now) <= fromInteger signedRequestSeconds) $ Left $ ORBadRequest "the timestamp is outside the window"
+  unless (signedWithin signedRequestSeconds now timestamp) $ Left $ ORBadRequest "the timestamp is outside the window"
+
+signedWithin :: Integer -> UTCTime -> Word64 -> Bool
+signedWithin before now timestamp = age <= fromInteger before && negate age <= fromInteger signedRequestSeconds
+  where
+    age = diffUTCTime now $ roundedToUTCTime $ RoundedSystemTime $ fromIntegral timestamp
 
 -- | The paid years plus the free days until the term starts, by the service's clock, within the slack.
 checkDuration :: NamesConfig -> UTCTime -> Int -> Word64 -> Either OrderRefusal ()

@@ -52,12 +52,13 @@ import Simplex.Messaging.Agent.Store.Common (DBStore, withTransaction)
 import Simplex.Messaging.Encoding.String (textEncode)
 import qualified Simplex.Messaging.Agent.Store.DB as DB
 import Simplex.Chat.Badges.Ledger (addMonths)
+import Simplex.Messaging.Names.Record (USDCents)
 import Simplex.Messaging.SystemTime (RoundedSystemTime (..), SystemSeconds, roundedToUTCTime)
 import Simplex.Messaging.TMap (TMap)
 import qualified Simplex.Messaging.TMap as TM
-import Simplex.Messaging.Util (catchOwn', tshow, ($>>=))
+import Simplex.Messaging.Util (catchOwn', tshow)
 import StoreService.Config (ChainConfig (..), NamesConfig (..))
-import StoreService.Names.Balances (RefundRecord (..))
+import StoreService.Names.Balances (RefundRecord (..), RequestRefusal, requestedOrder)
 import StoreService.Names.Chain (Block (..), BlockTag (..), ChainError (..), TxHash, blockAt)
 import StoreService.Names.Codes (releaseCode)
 import StoreService.Names.Contracts (CommitmentAges (..), Contracts (..), acceptedTerms, commitmentAges, commitmentTime, communityName, confirmedTag, controllerAvailable, disputeUntil, forgetNamePolicy, namePolicy)
@@ -67,6 +68,7 @@ import StoreService.Names.Registration (RegisterIntent (..), TermsAcceptance (..
 import StoreService.Names.Reveal (intentOf)
 import StoreService.Names.Revert (RevertName (..), RevertReason (..))
 import StoreService.Names.Sender (PendingTx, SendError (..), Sender, awaitOutcome, inFlightTransaction, ptHash, submitTransaction, submitTransactionIf)
+import StoreService.Names.Signatures (RefundRequest (..))
 import StoreService.Names.Store
 import StoreService.Names.Turns (Turns, withBalanceTurn, withLabelTurn, withRegistrationTurn)
 import StoreService.Names.View (lapseMoment, lapsedAt, registrationVersion)
@@ -608,7 +610,7 @@ reasonText = \case
 data Closed = CLRegistered RegistrationId | CLEnded RegistrationId | CLRefunded UTCTime RefundRecord | CLRefused CloseRefusal
   deriving (Eq, Show)
 
-data CloseRefusal = CFNoOrder | CFNotFailedPaid | CFMonthEnded | CFUnread | CFChanged | CFBalanceChanged | CFReversed
+data CloseRefusal = CFNoOrder | CFNotFailedPaid | CFMonthEnded | CFUnread | CFChanged | CFBalanceChanged | CFReversed | CFAmount USDCents | CFRequestRefused RequestRefusal
   deriving (Eq, Show)
 
 newtype CloseRefused = CloseRefused CloseRefusal
@@ -616,12 +618,13 @@ newtype CloseRefused = CloseRefused CloseRefusal
 
 instance E.Exception CloseRefused
 
-closeRegistration :: DBStore -> Contracts -> Turns -> IO UTCTime -> Text -> IO Closed
-closeRegistration st ct turns clock ref = do
+closeRegistration :: DBStore -> Contracts -> Turns -> IO UTCTime -> RefundRequest -> IO Closed
+closeRegistration st ct turns clock req@RefundRequest {rqCents} = do
   now <- clock
-  withTransaction st (\db -> balanceByReference db ref $>>= getRegistration db . fst) >>= \case
-    Nothing -> refused CFNoOrder
-    Just r ->
+  requestedOrder st now req >>= \case
+    Left refusal -> refused $ CFRequestRefused refusal
+    Right Nothing -> refused CFNoOrder
+    Right (Just r) ->
       withRegistrationTurn st turns r (closeFailed now) <&> \case
         Just (Right closed) -> closed
         _ -> CLRefused CFChanged
@@ -639,10 +642,10 @@ closeRegistration st ct turns clock ref = do
         LEnded _ -> pure $ CLEnded nrId
         LChanged -> refused CFChanged
         LUnread -> refused CFUnread
-        LNotLanded -> either CLRefused (CLRefunded endedAt) <$> refundTaken st turns now r {nrReveal = Nothing}
+        LNotLanded -> either CLRefused (CLRefunded endedAt) <$> refundTaken st turns now rqCents r {nrReveal = Nothing}
 
-refundTaken :: DBStore -> Turns -> UTCTime -> NameRegistration -> IO (Either CloseRefusal RefundRecord)
-refundTaken st turns now r@NameRegistration {nrId} =
+refundTaken :: DBStore -> Turns -> UTCTime -> USDCents -> NameRegistration -> IO (Either CloseRefusal RefundRecord)
+refundTaken st turns now asked r@NameRegistration {nrId} =
   withBalanceTurn turns nrId $ either (\(CloseRefused refusal) -> Left refusal) id <$> E.try (withTransaction st refund)
   where
     refund db =
@@ -655,6 +658,7 @@ refundTaken st turns now r@NameRegistration {nrId} =
             Right _ -> Right <$> refundAll db
     refundAll db = do
       cents <- maybe 0 blAmount <$> getBalance db nrId
+      when (cents /= asked) $ E.throwIO $ CloseRefused $ CFAmount cents
       refundBalance db nrId cents now >>= \case
         True -> RefundRecord nrId cents <$> balanceLink db nrId
         False -> E.throwIO $ CloseRefused CFBalanceChanged

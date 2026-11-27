@@ -6,7 +6,7 @@
 
 module Bots.StoreService.NamesLateCreditTests (namesLateCreditTests) where
 
-import Bots.StoreService.NamesBalancesTests (figures, invariantHolds, placeOrderRow, source)
+import Bots.StoreService.NamesBalancesTests (figures, invariantHolds, placeOrderRow, recordOwnerRefund, source)
 import Bots.StoreService.NamesStoreTests (at, reg)
 import Bots.StoreService.WebTests (StubCall (..), StubState (..), capturingStderr, newStubState, renameTable, sampleProviderInvoice, setSignals, stubCalls, stubProvider, stubRate, withServiceStore)
 import qualified Control.Exception as E
@@ -22,7 +22,6 @@ import Simplex.Messaging.Agent.Store.Common (DBStore, withTransaction)
 import qualified Simplex.Messaging.Agent.Store.DB as DB
 import Simplex.Messaging.Names.Record (USDCents)
 import StoreService.Config (PollConfig (..))
-import StoreService.Names.Balances (recordRefund)
 import StoreService.Names.LateCredits (CreditOutcome (..), LateDue (..), creditLateInvoice, lateCreditOf)
 import StoreService.Names.Phases (RegistrationId (..))
 import StoreService.Names.Store
@@ -615,9 +614,9 @@ testCreditRefundTwice = withLate $ \l@Late {lStore = st} -> do
   turns <- newTurns
   closedOrder l "x" False
   void $ readSignal l "x" (SigClosed (btcPaid lateUnits 160000) PaidInPart)
-  void (recordRefund turns st "x" 9600 (at 80) >>= either (fail . show) pure)
+  void (recordOwnerRefund turns st "x" 9600 (at 80) >>= either (fail . show) pure)
   void $ readSignal l "x" (SigClosed (btcPaid lateUnits lateUnits) PaidInPart)
-  void (recordRefund turns st "inv-x" 9600 (at 81) >>= either (fail . show) pure)
+  void (recordOwnerRefund turns st "inv-x" 9600 (at 81) >>= either (fail . show) pure)
   balanceOf st "x" `shouldReturn` Just (0, 19200, 19200)
   invariantHolds st "x"
 
@@ -633,7 +632,7 @@ testZeroBalances :: IO ()
 testZeroBalances = withLate $ \Late {lStore = st} -> do
   turns <- newTurns
   source st "refunded" 10000
-  void (recordRefund turns st "refunded" 10000 (at 5) >>= either (fail . show) pure)
+  void (recordOwnerRefund turns st "refunded" 10000 (at 5) >>= either (fail . show) pure)
   balanceAt st "refunded" `shouldReturn` Just (balanceObject 0 10000)
   placeOrderRow st "none" False 20000 (at 60)
   balanceAt st "none" `shouldReturn` Nothing

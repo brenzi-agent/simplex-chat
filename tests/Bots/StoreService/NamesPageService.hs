@@ -36,10 +36,10 @@ import Simplex.Messaging.Agent.Store.Common (withTransaction)
 import Simplex.Messaging.Names.Record (USDCents (..))
 import StoreService.Config (BTCPayConfig (..), ListenerConfig (..), ServiceConfig (..), StripeConfig (..), readServiceConfig)
 import StoreService.Names.Codes (issueNameCode)
-import StoreService.Names.Store (Balance (..), CmdSource (..), LatePending (..), balanceByReference, latePending)
+import StoreService.Names.Store (Balance (..), CmdSource (..), LatePending (..), balanceByReference, latePending, refundBalance)
 import StoreService.Options (storeServiceOpts)
 import StoreService.Service (ServiceState (..), newServiceState, storeService)
-import StoreService.Store.Invoices (InvoicePayment (..), InvoiceRow (..), getInvoice)
+import StoreService.Store.Invoices (InvoicePayment (..), InvoiceRow (..), currentSecond, getInvoice)
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import Test.Hspec (Spec, describe, it, pendingWith)
@@ -132,11 +132,12 @@ refundControl PageControls {pcService} ref o = case JT.parseEither (J..:? "cents
   Right cents_ ->
     withTransaction (chatStore pcService) (`balanceByReference` ref) >>= \case
       Nothing -> pure $ Left (notFound404, "no order " <> ref)
-      Just (_, balance) -> do
+      Just (rid, balance) -> do
         let cents = fromMaybe (maybe 0 (\Balance {blAmount = USDCents c} -> c) balance) cents_
-        sendChatCmdStr pcService ("//record_refund " <> T.unpack ref <> " " <> show cents) >>= \case
-          Right (CRCustomChatResponse _ answer) -> pure $ Right $ J.object ["cents" J..= cents, "answer" J..= answer]
-          r -> pure $ Left (conflict409, T.pack (show (() <$ r)))
+        now <- currentSecond
+        withTransaction (chatStore pcService) (\db -> refundBalance db rid (USDCents cents) now) >>= \case
+          True -> pure $ Right $ J.object ["cents" J..= cents]
+          False -> pure $ Left (conflict409, "the balance is not " <> T.pack (show cents) <> " cents")
 
 invoiceControl :: PageControls -> Text -> InvoiceId -> J.Object -> IO ControlAnswer
 invoiceControl pc action invId o =

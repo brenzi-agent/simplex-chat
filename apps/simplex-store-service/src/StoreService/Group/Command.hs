@@ -29,10 +29,10 @@ import Simplex.Chat.Badges.Code (BadgeCode, NameLength, NamePrepaidCode, maxName
 import Simplex.Chat.Badges.Types (BadgeCodePaymentStatus (..))
 import Simplex.Chat.Types.Preferences (ChatBotCommand (..))
 import Simplex.Chat.Types.Shared (GroupMemberRole (..))
-import Simplex.Messaging.Encoding.String (TextEncoding (..))
-import Simplex.Messaging.Names.Record (USDCents)
+import Simplex.Messaging.Encoding.String (StrEncoding (..), TextEncoding (..))
 import Simplex.Messaging.Util (safeDecodeUtf8, tshow)
 import StoreService.Config (boundedDecimal)
+import StoreService.Names.Signatures (RefundRequest (..))
 import StoreService.Names.Store (CmdSource (..))
 
 maxBulk, maxUses, maxMonths, maxNameYears :: Int
@@ -50,7 +50,7 @@ data GroupCmd
   | GCMoney MoneyCmd
   deriving (Eq, Show)
 
-data MoneyCmd = MCBalance Text | MCRecordRefund Text USDCents | MCClose Text
+data MoneyCmd = MCBalance Text | MCRecordRefund RefundRequest | MCClose RefundRequest
   deriving (Eq, Show)
 
 spelledCmd :: CmdSource -> Text -> Text
@@ -165,8 +165,11 @@ prepaidCodeP = A.takeWhile1 (not . isSpace) >>= maybe (fail "not a name code") p
 
 balanceArgsP, recordRefundArgsP, closeArgsP :: A.Parser MoneyCmd
 balanceArgsP = MCBalance <$> referenceP
-recordRefundArgsP = MCRecordRefund <$> referenceP <* A.space <*> (fromIntegral <$> boundedInt centsOpt)
-closeArgsP = MCClose <$> referenceP
+recordRefundArgsP = MCRecordRefund <$> refundRequestP
+closeArgsP = MCClose <$> refundRequestP
+
+refundRequestP :: A.Parser RefundRequest
+refundRequestP = RefundRequest <$> referenceP <* A.space <*> (fromIntegral <$> boundedInt centsOpt) <* A.space <*> textTokenP <* A.space <*> boundedDecimal 0 maxBound <* A.space <*> strP
 
 referenceP :: A.Parser Text
 referenceP = safeDecodeUtf8 <$> A.takeWhile1 (not . isSpace)
@@ -226,10 +229,11 @@ cmdParams source = \case
   CTBulk -> kindParams badgeKinds [monthsOpt] <> " " <> optArg countOpt
   CTRevoke -> "<code>"
   CTBalance -> referenceArg
-  CTRecordRefund -> referenceArg <> " " <> optVar centsOpt
-  CTClose -> referenceArg
+  CTRecordRefund -> refundArgs
+  CTClose -> refundArgs
   where
     referenceArg = "<reference>"
+    refundArgs = referenceArg <> " " <> optVar centsOpt <> " <destination> <timestamp> <signature>"
     kindParams kinds opts = "<" <> T.intercalate "|" kinds <> "> [" <> T.intercalate "|" (map optKey opts) <> " <N>]"
 
 cmdUsage :: CmdSource -> CmdTag -> Text

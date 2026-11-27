@@ -46,14 +46,15 @@ import StoreService.Config (AppleStoreConfig (..), BadgeIssuerKey (..), ChainCon
 import StoreService.Group (GroupEvent, ensureManagedGroup, fmtTime, groupEvent, hasTracker, joinerAcceptance, refreshTracker, reportToGroup, runCmd, runGroupLane)
 import StoreService.Group.Command (MoneyCmd (..), consoleCmd, spelledCmd)
 import StoreService.Metrics (MetricsEnv (..), runMetrics)
-import StoreService.Names.Balances (RefundRecord (..), RefundRefusal (..), recordRefund)
+import StoreService.Names.Balances (RefundRecord (..), RefundRefusal (..), RequestRefusal (..), recordRefund)
 import StoreService.Names.Chain (ChainClient, newChainClient, nodeChainId)
 import StoreService.Names.Contracts (Contracts, Terms (..), communityName, namePolicy, newContracts, runTermsFetch, termsLinks)
 import StoreService.Names.Env (NamesEnv (..), newNamesEnv)
-import StoreService.Names.Orders (ordersEnv)
+import StoreService.Names.Orders (ordersEnv, refundRequestSeconds)
 import StoreService.Names.Phases (RegistrationId (..))
 import StoreService.Names.Records (runRecordEdits)
 import StoreService.Names.Sender (checkPendingSignatures, runSender)
+import StoreService.Names.Signatures (RefundDestination (..), RefundRequest (..))
 import StoreService.Names.Store (Balance (..), BalanceLink (..), CmdSource (..), LateCredit (..), OrderPayment (..), balanceByReference, balanceLink, creditCents)
 import StoreService.Names.Turns (Turns, newTurns)
 import StoreService.Names.View (addressText)
@@ -103,7 +104,7 @@ import Simplex.Chat.Core (sendChatCmd, simplexChatCore)
 import Simplex.Chat.Options (CoreChatOpts (..))
 import Simplex.Chat.Options.DB (dbString)
 import Simplex.Chat.PaymentService (AppleTransactionFacts (..), ServicePayment (..), appleTransactionFacts)
-import Simplex.Chat.PaymentService.Types (InvoiceId (..), PaymentProvider (..), StoreTransactionRef (..))
+import Simplex.Chat.PaymentService.Types (InvoiceId (..), PaymentProvider (..), ServicePaymentMethod (SPMCard), StoreTransactionRef (..))
 import Simplex.Chat.Terminal (terminalChatConfig)
 import Simplex.Chat.Terminal.Main (simplexChatCLI')
 import Simplex.Chat.Types (AgentInvId (..), User (..))
@@ -427,8 +428,8 @@ runBadgeCmd turns chain_ cc cmd = case consoleCmd (safeDecodeUtf8 cmd) of
 runMoneyCmd :: CmdSource -> Turns -> Maybe (SimplexTLD, Int, ChainClient) -> ChatController -> MoneyCmd -> IO (Either T.Text T.Text)
 runMoneyCmd source turns chain_ cc = \case
   MCBalance ref -> showRefund source cc ref
-  MCRecordRefund ref cents -> refundBalanceCmd turns cc ref cents
-  MCClose ref -> maybe (pure $ Left "Names are not enabled on this service.") (\chain -> closeOrderCmd source turns chain cc ref) chain_
+  MCRecordRefund req -> refundBalanceCmd turns cc req
+  MCClose req -> maybe (pure $ Left "Names are not enabled on this service.") (\chain -> closeOrderCmd source turns chain cc req) chain_
 
 -- | Left is a refusal or a failure; both sides are the text to show the operator.
 showRefund :: CmdSource -> ChatController -> T.Text -> IO (Either T.Text T.Text)
@@ -448,14 +449,14 @@ showRefund source cc ref =
       | otherwise = "Nothing to refund."
 
 -- | The refund is recorded before support pays it, so the balance cannot be spent meanwhile.
-refundBalanceCmd :: Turns -> ChatController -> T.Text -> USDCents -> IO (Either T.Text T.Text)
-refundBalanceCmd turns ChatController {chatStore} ref cents = do
+refundBalanceCmd :: Turns -> ChatController -> RefundRequest -> IO (Either T.Text T.Text)
+refundBalanceCmd turns ChatController {chatStore} req@RefundRequest {rqReference = ref, rqCents = cents, rqDestination} = do
   now <- currentSecond
-  ((Right <$> recordRefund turns chatStore ref cents now) `catchOwn` (pure . Left)) >>= \case
+  ((Right <$> recordRefund turns chatStore req now) `catchOwn` (pure . Left)) >>= \case
     Right (Right RefundRecord {rdRegistration = RegistrationId rid, rdCents, rdLink}) -> do
       -- The registration id, not the reference, since an invoice id is kept out of the logs.
       logNote $ "names: recorded a refund of " <> tshow (toInteger rdCents) <> " cents for order " <> rid
-      pure $ Right $ "Recorded a refund of " <> dollars rdCents <> " for order " <> rid <> ". Refund it now, by: " <> linkText rdLink <> "."
+      pure $ Right $ "Recorded a refund of " <> dollars rdCents <> " for order " <> rid <> ". Refund it now to " <> destinationText rqDestination <> ", by: " <> linkText rdLink <> "."
     Right (Left refusal) -> pure $ Left $ "Nothing recorded: " <> refusalText refusal <> "."
     Left e -> Left "The refund could not be recorded." <$ logError ("names: recording a refund failed: " <> tshow e)
   where
@@ -463,21 +464,34 @@ refundBalanceCmd turns ChatController {chatStore} ref cents = do
       RefundNoOrder -> "no order has the reference " <> ref
       RefundNoBalance -> "the order of " <> ref <> " has no balance"
       RefundAmount amount -> "the balance is " <> dollars amount <> " now, not " <> dollars cents
+      RefundRequestRefused refusal -> requestRefusalText refusal
+
+requestRefusalText :: RequestRefusal -> T.Text
+requestRefusalText = \case
+  RQOutsideWindow -> "the request was signed more than " <> tshow (refundRequestSeconds `div` 86400) <> " days ago or ahead of the service's clock; ask the buyer to sign a new one"
+  RQDestination (OPInvoice SPMCard {} _) -> "the order was paid by card, which is refunded to its card, not to an address"
+  RQDestination (OPInvoice method _) -> "the order was paid by " <> textEncode method <> ", which is refunded to an address the buyer gives, not to a card"
+  RQDestination (OPCode _) -> "the order was paid with a prepaid code, so nothing is refunded"
+
+destinationText :: RefundDestination -> T.Text
+destinationText = \case
+  RDCard -> "the card"
+  RDAddress address -> address
 
 newConsoleChain :: NamesConfig -> IO (SimplexTLD, Int, ChainClient)
 newConsoleChain NamesConfig {nTLD, nMinPriceCentsPerYear, nChain} = do
   chain <- C.newRandom >>= (`newChainClient` nChain)
   pure (nTLD, nMinPriceCentsPerYear, chain)
 
-closeOrderCmd :: CmdSource -> Turns -> (SimplexTLD, Int, ChainClient) -> ChatController -> T.Text -> IO (Either T.Text T.Text)
-closeOrderCmd source turns (tld, minPriceCentsPerYear, chain) ChatController {chatStore} ref = do
+closeOrderCmd :: CmdSource -> Turns -> (SimplexTLD, Int, ChainClient) -> ChatController -> RefundRequest -> IO (Either T.Text T.Text)
+closeOrderCmd source turns (tld, minPriceCentsPerYear, chain) ChatController {chatStore} req@RefundRequest {rqReference = ref, rqCents = cents, rqDestination} = do
   ct <- newContracts chatStore tld minPriceCentsPerYear chain
-  ((Right <$> closeRegistration chatStore ct turns currentSecond ref) `catchOwn` (pure . Left)) >>= \case
+  ((Right <$> closeRegistration chatStore ct turns currentSecond req) `catchOwn` (pure . Left)) >>= \case
     Right (CLRefunded endedAt RefundRecord {rdRegistration = RegistrationId rid, rdCents, rdLink}) -> do
       logNote $ "names: closed order " <> rid <> " and recorded a refund of " <> tshow (toInteger rdCents) <> " cents"
       pure $ Right $
         "Closed order " <> rid <> ", failed or lapsed unsigned at " <> fmtTime endedAt <> ", as taken and recorded a refund of " <> dollars rdCents
-          <> ". Check at the provider that it was not refunded by hand before; if not, refund it now, by: " <> linkText rdLink <> "."
+          <> ". Check at the provider that it was not refunded by hand before; if not, refund it now to " <> destinationText rqDestination <> ", by: " <> linkText rdLink <> "."
     Right (CLRegistered (RegistrationId rid)) -> do
       logNote $ "names: order " <> rid <> " set registered by " <> spelledCmd source "close" <> ", as its register went through"
       pure $ Left $ "Nothing refunded: the register of order " <> rid <> " went through, so the order is registered now."
@@ -494,6 +508,8 @@ closeOrderCmd source turns (tld, minPriceCentsPerYear, chain) ChatController {ch
       CFChanged -> "the order of " <> ref <> " changed meanwhile; " <> again
       CFBalanceChanged -> "the balance of the order of " <> ref <> " changed meanwhile; " <> again
       CFReversed -> "a reversal of the payment of the order of " <> ref <> " was recorded, so nothing is refunded"
+      CFAmount amount -> "the close records a refund of " <> dollars amount <> ", not " <> dollars cents
+      CFRequestRefused refusal -> requestRefusalText refusal
     again = "run " <> spelledCmd source "close" <> " again"
 
 -- | The balance's order and the money paid for it.

@@ -6,7 +6,7 @@
 module Bots.StoreService.NamesWorkerTests (namesWorkerTests, serveWorker) where
 
 import Bots.StoreService.FakeEthNode
-import Bots.StoreService.NamesBalancesTests (figures)
+import Bots.StoreService.NamesBalancesTests (figures, recordOwnerRefund, refundAddress, signedRefund)
 import Bots.StoreService.NamesContractsTests (availableCall, maxCommitmentAgeCall, minCommitmentAgeCall, newPolicy, otherResolver, registrarOf)
 import Bots.StoreService.NamesOrdersTests
 import Bots.StoreService.NamesOwnerTests (answerDisputeUntil, answerExpiry, answerFree, answerOwner, answerUnowned, byB, codeIn, committedPhase, dynamisOrder, failedPhase, labelBytes, ownerOfSelector, paidIn, rewrite, select, selectionOf, sentRegister, stored)
@@ -33,7 +33,7 @@ import Data.Time.Clock (NominalDiffTime, UTCTime, addUTCTime, diffUTCTime)
 import Simplex.Chat.Badges.Ledger (addMonths)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Data.Word (Word8, Word64)
-import Simplex.Chat.PaymentService.Types (CurrencyAmount (..), InvoiceStatus (..))
+import Simplex.Chat.PaymentService.Types (CurrencyAmount (..), InvoiceStatus (..), ServicePaymentMethod (SPMCard))
 import Simplex.Messaging.Agent.Store.Common (withTransaction)
 import qualified Simplex.Messaging.Agent.Store.DB as DB
 import Simplex.Messaging.Crypto (keccak256)
@@ -46,7 +46,7 @@ import Simplex.Messaging.SystemTime (RoundedSystemTime (..), SystemSeconds)
 import Simplex.Messaging.Util (tshow)
 import StoreService.Config (ChainConfig (..), NamesConfig (..))
 import StoreService.Names.Abi (AbiValue (..), abiBytes, abiTuple, addressWord, selector, uint256)
-import StoreService.Names.Balances (RefundRecord (..), RefundRefusal (..), recordRefund)
+import StoreService.Names.Balances (RefundRecord (..), RefundRefusal (..), RequestRefusal (..))
 import StoreService.Names.Chain (Block (..), ChainClient, ChainError (..), Hex32 (..), TxHash (..), blockAt, decodeSignedTx, newChainClient)
 import StoreService.Names.Contracts (namePolicy)
 import StoreService.Names.Orders (Landing (..), OrdersEnv (..), confirmLanded)
@@ -55,9 +55,10 @@ import StoreService.Names.Registration (RegisterIntent (..), TermsAcceptance (..
 import StoreService.Names.Reveal (intentOf)
 import StoreService.Names.Revert (RevertName (..), RevertReason (..), actedReverts)
 import StoreService.Names.Sender
-import StoreService.Names.Signatures (OrderAction (..))
+import StoreService.Names.Signatures (OrderAction (..), RefundDestination (..))
 import StoreService.Names.Store
 import StoreService.Names.Turns (withBalanceTurn, withLabelTurn)
+import StoreService.Names.View (addressText)
 import StoreService.Names.Worker
 import StoreService.Providers (Reversal (..))
 import StoreService.Store.Invoices (InvoiceRow (..), getInvoice)
@@ -1704,7 +1705,18 @@ testRetryInNameTurn = withWorker $ \W {wCtx = ctx@Ctx {cOrders}} -> do
   nrPhase <$> stored ctx renamed `shouldReturn` nrPhase renamed
 
 closeOf :: Ctx -> NameRegistration -> IO Closed
-closeOf Ctx {cOrders = OrdersEnv {oeStore, oeContracts, oeTurns, oeNow}} NameRegistration {nrId = RegistrationId rid} = closeRegistration oeStore oeContracts oeTurns oeNow rid
+closeOf Ctx {cOrders = OrdersEnv {oeStore, oeContracts, oeTurns, oeNow}} NameRegistration {nrId = rid@(RegistrationId ridText), nrOwner, nrPrice, nrPayment} = do
+  balance <- maybe 0 blAmount <$> withTransaction oeStore (`getBalance` rid)
+  req <- oeNow >>= signedRefund (ownerKey nrOwner) ridText (nrPrice + balance) (requestedDestination nrPayment)
+  closeRegistration oeStore oeContracts oeTurns oeNow req
+
+ownerKey :: Address -> Secp256k1PrivateKey
+ownerKey owner = if addressText owner == ownerAText then keyA else keyB
+
+requestedDestination :: OrderPayment -> RefundDestination
+requestedDestination = \case
+  OPInvoice SPMCard {} _ -> RDCard
+  _ -> RDAddress refundAddress
 
 figuresOf :: Ctx -> NameRegistration -> IO (Maybe (USDCents, USDCents, USDCents))
 figuresOf Ctx {cStore} NameRegistration {nrId = RegistrationId rid} = figures cStore rid
@@ -1730,7 +1742,7 @@ testCloseFailed = withWorker $ \W {wCtx = ctx@Ctx {cStore, cOrders}} -> do
   (nrPhase x, nrReveal x, nrVersion x) `shouldBe` (OTaken orderTime, Nothing, nrVersion r + 1)
   figuresOf ctx r `shouldReturn` Just (0, price, price)
   timeout prompt (withLabelTurn (oeTurns cOrders) (nrLabelHash r) $ withBalanceTurn (oeTurns cOrders) (nrId r) $ pure ()) `shouldReturn` Just ()
-  recordRefund (oeTurns cOrders) cStore rid price orderTime `shouldReturn` Left (RefundAmount 0)
+  recordOwnerRefund (oeTurns cOrders) cStore rid price orderTime `shouldReturn` Left (RefundAmount 0)
   retryOf ctx x `shouldReturn` refusedWith 400 "bad_request"
   answerFree ctx "alicebakers"
   to <- selectionOf ctx "alicebakers" 10
@@ -1779,13 +1791,13 @@ testCloseLanded = withWorker $ \W {wCtx = ctx} -> do
 
 testCloseRefused :: IO ()
 testCloseRefused = withWorker $ \W {wCtx = ctx@Ctx {cNode, cOrders = OrdersEnv {oeStore, oeContracts, oeTurns, oeNow}}} -> do
-  closeRegistration oeStore oeContracts oeTurns oeNow "t2Jk8RmQ4vXw9NcP3yLb6g" `shouldReturn` CLRefused CFNoOrder
+  (oeNow >>= signedRefund keyA "t2Jk8RmQ4vXw9NcP3yLb6g" 10000 (RDAddress refundAddress) >>= closeRegistration oeStore oeContracts oeTurns oeNow) `shouldReturn` CLRefused CFNoOrder
   answerFree ctx "carolbakery"
   (failedCode, _) <- codeIn ctx 8 (byB aliceOrder) {oLabel = "carolbakery", oSecret = secretOf 2} failedPhase
   queued <- paidIn ctx aliceOrder id
   unread <- paidIn ctx dynamisOrder failedPhase
   answerCall cNode (registrarOf cNode) (ownerOfSelector <> labelBytes "dynamis") $ Reverts $ unhex "37ed32e8"
-  forM_ [(queued, CFNotFailedPaid), (failedCode, CFNotFailedPaid), (unread, CFUnread)] $ \(r, refusal) -> do
+  forM_ [(queued, CFNotFailedPaid), (failedCode, CFRequestRefused $ RQDestination $ nrPayment failedCode), (unread, CFUnread)] $ \(r, refusal) -> do
     (nrId r,) <$> closeOf ctx r `shouldReturn` (nrId r, CLRefused refusal)
     stored ctx r `shouldReturn` r
     figuresOf ctx r `shouldReturn` Nothing

@@ -5,8 +5,10 @@
 {-# LANGUAGE TupleSections #-}
 
 module StoreService.Names.Balances
-  ( RefundRefusal (..),
+  ( RequestRefusal (..),
+    RefundRefusal (..),
     RefundRecord (..),
+    requestedOrder,
     recordRefund,
     reverseOrder,
     warnOfFraud,
@@ -17,28 +19,34 @@ import Control.Concurrent.STM (atomically)
 import qualified Control.Exception as E
 import Control.Logger.Simple (logError, logNote)
 import Control.Monad (unless)
+import Data.Functor ((<&>))
 import Data.Int (Int64)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (UTCTime)
-import Simplex.Chat.PaymentService.Types (CurrencyAmount (..))
+import Simplex.Chat.PaymentService.Types (CurrencyAmount (..), ServicePaymentMethod (SPMCard, SPMCrypto))
 import Simplex.Messaging.Agent.Store.Common (DBStore, withTransaction)
 import qualified Simplex.Messaging.Agent.Store.DB as DB
 import Simplex.Messaging.Encoding.String (StrEncoding (..), textEncode)
+import Simplex.Messaging.Eth.Address (recoverAddress)
 import Simplex.Messaging.Names.Record (USDCents)
-import Simplex.Messaging.Util (safeDecodeUtf8, tshow)
-import StoreService.Names.Orders (OrdersEnv (..))
+import Simplex.Messaging.Util (eitherToMaybe, safeDecodeUtf8, tshow, ($>>=))
+import StoreService.Names.Orders (OrdersEnv (..), refundRequestSeconds, signedWithin)
 import StoreService.Names.Phases (RegistrationId (..), publish)
 import StoreService.Names.Registration (TermsAcceptance (..))
-import StoreService.Names.Store (Balance (..), BalanceLink, BrokenInvariant (..), InvoiceClose (..), NamePhase (..), NameRegistration (..), NameReveal (..), NameTransaction (..), OrderPhase (..), RegistrationTx (..), TxFor (..), TxSettlement (..), TxState (..), VersionWrite (..), balanceByReference, balanceLink, getBalance, getRegistration, lockRegistration, namePhase, orderLive, recordReversal, refundBalance, registerTxSent, registrationTransactions, takeBackBalance, updateRegistration)
+import StoreService.Names.Signatures (RefundDestination (..), RefundRequest (..), personalDigest, refundMessage)
+import StoreService.Names.Store (Balance (..), BalanceLink, BrokenInvariant (..), InvoiceClose (..), NamePhase (..), NameRegistration (..), NameReveal (..), NameTransaction (..), OrderPayment (..), OrderPhase (..), RegistrationTx (..), TxFor (..), TxSettlement (..), TxState (..), VersionWrite (..), balanceByReference, balanceLink, getBalance, getRegistration, lockRegistration, namePhase, orderLive, recordReversal, refundBalance, registerTxSent, registrationTransactions, takeBackBalance, updateRegistration)
 import StoreService.Names.Turns (Turns, withBalanceTurn, withRegistrationTurn)
 import StoreService.Names.View (addressText)
 import StoreService.Orders (RegistrationChanged (..))
 import StoreService.Providers (Reversal (..))
 import StoreService.Store.Invoices (InvoiceRow (..), lockInvoice)
 
+data RequestRefusal = RQOutsideWindow | RQDestination OrderPayment
+  deriving (Eq, Show)
+
 -- | RefundAmount: the balance's amount now, which is not the cents given.
-data RefundRefusal = RefundNoOrder | RefundNoBalance | RefundAmount USDCents
+data RefundRefusal = RefundNoOrder | RefundNoBalance | RefundAmount USDCents | RefundRequestRefused RequestRefusal
   deriving (Eq, Show)
 
 -- | The order and the money paid for it, for support to pay it back by the method that paid it.
@@ -49,12 +57,31 @@ data RefundRecord = RefundRecord
   }
   deriving (Eq, Show)
 
+requestedOrder :: DBStore -> UTCTime -> RefundRequest -> IO (Either RequestRefusal (Maybe NameRegistration))
+requestedOrder st now RefundRequest {rqReference, rqCents, rqDestination, rqTimestamp, rqSignature}
+  | not (signedWithin refundRequestSeconds now rqTimestamp) = pure $ Left RQOutsideWindow
+  | otherwise = do
+      signer <- eitherToMaybe <$> recoverAddress rqSignature (personalDigest $ refundMessage rqReference rqCents rqDestination rqTimestamp)
+      withTransaction st (\db -> balanceByReference db rqReference $>>= getRegistration db . fst) <&> \case
+        Just r@NameRegistration {nrOwner, nrPayment}
+          | signer /= Just nrOwner -> Right Nothing
+          | refundsTo nrPayment rqDestination -> Right $ Just r
+          | otherwise -> Left $ RQDestination nrPayment
+        Nothing -> Right Nothing
+
+refundsTo :: OrderPayment -> RefundDestination -> Bool
+refundsTo payment destination = case (payment, destination) of
+  (OPInvoice SPMCard {} _, RDCard) -> True
+  (OPInvoice SPMCrypto {} _, RDAddress _) -> True
+  _ -> False
+
 -- | The reference is the order's registration id or its name invoice's id. In the balance's turn and one transaction.
-recordRefund :: Turns -> DBStore -> Text -> USDCents -> UTCTime -> IO (Either RefundRefusal RefundRecord)
-recordRefund turns st ref cents now =
-  withTransaction st (`balanceByReference` ref) >>= \case
-    Nothing -> pure $ Left RefundNoOrder
-    Just (rid, _) -> withBalanceTurn turns rid $ withTransaction st refund
+recordRefund :: Turns -> DBStore -> RefundRequest -> UTCTime -> IO (Either RefundRefusal RefundRecord)
+recordRefund turns st req@RefundRequest {rqReference = ref, rqCents = cents} now =
+  requestedOrder st now req >>= \case
+    Left refused -> pure $ Left $ RefundRequestRefused refused
+    Right Nothing -> pure $ Left RefundNoOrder
+    Right (Just NameRegistration {nrId}) -> withBalanceTurn turns nrId $ withTransaction st refund
   where
     refund db =
       refundable db $ \rid@(RegistrationId r) ->

@@ -15,6 +15,9 @@ module StoreService.Names.Signatures
     selectionMessage,
     OrderAction (..),
     orderRequestMessage,
+    RefundDestination (..),
+    RefundRequest (..),
+    refundMessage,
     parseChecksumAddress,
     parseAnyCaseAddress,
   )
@@ -38,6 +41,7 @@ import Simplex.Messaging.Crypto (keccak256, sha256Hash)
 import Simplex.Messaging.Crypto.Secp256k1 (RecoverableSignature)
 import Simplex.Messaging.Encoding.String (StrEncoding (..), TextEncoding (..))
 import Simplex.Messaging.Eth.Address (Address, unAddress)
+import Simplex.Messaging.Names.Record (USDCents)
 import Simplex.Messaging.Parsers (defaultJSON)
 import Simplex.Messaging.SimplexName (LabelHash (..))
 import Simplex.Messaging.Util (eitherToMaybe, tshow)
@@ -111,6 +115,29 @@ instance TextEncoding OrderAction where
 
 orderRequestMessage :: Text -> OrderAction -> Word64 -> ByteString
 orderRequestMessage oid action timestamp = message ["order", oid, textEncode action, tshow timestamp]
+
+data RefundDestination = RDCard | RDAddress Text
+  deriving (Eq, Show)
+
+instance TextEncoding RefundDestination where
+  textEncode = \case
+    RDCard -> "card"
+    RDAddress address -> address
+  textDecode = \case
+    "card" -> Just RDCard
+    address -> Just $ RDAddress address
+
+data RefundRequest = RefundRequest
+  { rqReference :: Text,
+    rqCents :: USDCents,
+    rqDestination :: RefundDestination,
+    rqTimestamp :: Word64,
+    rqSignature :: RecoverableSignature
+  }
+  deriving (Eq, Show)
+
+refundMessage :: Text -> USDCents -> RefundDestination -> Word64 -> ByteString
+refundMessage ref cents destination timestamp = message ["order", ref, "refund", tshow (toInteger cents), textEncode destination, tshow timestamp]
 
 message :: [Text] -> ByteString
 message = encodeUtf8 . T.unwords . ("simplex.domains" :)

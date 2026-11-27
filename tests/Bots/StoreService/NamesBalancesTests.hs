@@ -5,11 +5,11 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeOperators #-}
 
-module Bots.StoreService.NamesBalancesTests (namesBalancesTests, cardPaid, credit, creditLate, figures, invariantHolds, lateCredit, payment, placeOrderRow, source) where
+module Bots.StoreService.NamesBalancesTests (namesBalancesTests, cardPaid, credit, creditLate, figures, invariantHolds, lateCredit, payment, placeOrderRow, recordOwnerRefund, refundAddress, signedRefund, source) where
 
 import Bots.StoreService.FakeEthNode (plainTerms)
 import Bots.StoreService.FakeStripe (FakeStripe (..), stripeObjectEvent, stripeSigHeader, withFakeStripe)
-import Bots.StoreService.NamesOrdersTests (Ctx (..), withOrders, withOrdersVia)
+import Bots.StoreService.NamesOrdersTests (Ctx (..), keyA, withOrders, withOrdersVia)
 import Bots.StoreService.NamesStoreTests (at, btc, hashFixture, newReg, ownerA, paidOrder, reg, t0, write)
 import Bots.StoreService.WebTests (agreed, blockedInSTM, lengthOf, rcv, statusOf, webRequestBody, withServiceStore)
 import Control.Concurrent.Async (async, asyncThreadId, wait)
@@ -28,6 +28,7 @@ import Simplex.Chat.PaymentService.Types (CardProvider (..), CryptoCurrency (..)
 import Simplex.Messaging.Agent.Store.Common (DBStore, withTransaction)
 import qualified Simplex.Messaging.Agent.Store.DB as DB
 import qualified Simplex.Messaging.Crypto as C
+import Simplex.Messaging.Crypto.Secp256k1 (Secp256k1PrivateKey, signRecoverable)
 import Simplex.Messaging.Encoding.String (StrEncoding (..))
 import Simplex.Messaging.Names.Record (USDCents)
 import Simplex.Messaging.SimplexName (labelHash)
@@ -37,9 +38,9 @@ import StoreService.Names.Balances
 import StoreService.Names.Orders (OrdersEnv (..))
 import StoreService.Names.Chain (Hex32 (..), TxHash (..))
 import StoreService.Names.Phases (RegistrationId (..))
-import StoreService.Names.Signatures (OrderFields (..))
+import StoreService.Names.Signatures (OrderFields (..), RefundDestination (..), RefundRequest (..), personalDigest, refundMessage)
 import StoreService.Names.Store
-import StoreService.Names.Turns (newTurns, withBalanceTurn, withLabelTurn)
+import StoreService.Names.Turns (Turns, newTurns, withBalanceTurn, withLabelTurn)
 import StoreService.Names.View (addressText)
 import StoreService.Orders (cancelOpenInvoice, settleOrder)
 import StoreService.Service (linkText)
@@ -151,6 +152,19 @@ credit st r cents = withTransaction st $ \db -> creditBalance db (RegistrationId
 
 refund :: DBStore -> Text -> USDCents -> IO Bool
 refund st r cents = withTransaction st $ \db -> refundBalance db (RegistrationId r) cents (at 5)
+
+signedRefund :: Secp256k1PrivateKey -> Text -> USDCents -> RefundDestination -> UTCTime -> IO RefundRequest
+signedRefund key rqReference rqCents rqDestination signedTime = do
+  g <- C.newRandom
+  let rqTimestamp = floor $ utcTimeToPOSIXSeconds signedTime
+  rqSignature <- either error id <$> signRecoverable g key (personalDigest $ refundMessage rqReference rqCents rqDestination rqTimestamp)
+  pure RefundRequest {rqReference, rqCents, rqDestination, rqTimestamp, rqSignature}
+
+refundAddress :: Text
+refundAddress = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+
+recordOwnerRefund :: Turns -> DBStore -> Text -> USDCents -> UTCTime -> IO (Either RefundRefusal RefundRecord)
+recordOwnerRefund turns st ref cents now = signedRefund keyA ref cents (RDAddress refundAddress) now >>= \req -> recordRefund turns st req now
 
 -- | Amount, credited and refunded.
 figures :: DBStore -> Text -> IO (Maybe (USDCents, USDCents, USDCents))
@@ -310,7 +324,7 @@ testRecordRefund = withServiceStore $ \st -> do
   source st "s" 10000
   placeOrderRow st "plain" False 20000 (at 60)
   let refundOf :: Text -> USDCents -> UTCTime -> IO (Either RefundRefusal RefundRecord)
-      refundOf ref cents now = recordRefund turns st ref cents now
+      refundOf ref cents now = recordOwnerRefund turns st ref cents now
   refundOf "nothing" 10000 t0 `shouldReturn` Left RefundNoOrder
   refundOf "plain" 20000 t0 `shouldReturn` Left RefundNoBalance
   refundOf "s" 9000 t0 `shouldReturn` Left (RefundAmount 10000)
